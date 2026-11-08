@@ -1,0 +1,31 @@
+# Bộ test curl chạy local (script, mock, kết quả) — không đưa lên repo
+tests/
+
+# Secret thật — repo chỉ có .env.example (standards/security-policy.md §1)
+.env
+.env.*
+!.env.example
+
+# Số liệu thô của thí nghiệm — chỉ SUMMARY.md lên Git
+experiments/results/raw/*
+!experiments/results/raw/.gitkeep
+
+# Ghi chú review code local
+claude/
+
+# Claude Code: log hook và cấu hình cá nhân
+.claude/logs/
+.claude/settings.local.json
+
+# Bộ quy tắc Claude và tài liệu dự án — chỉ giữ ở máy cá nhân, không đưa lên Git
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+project-knowledge/
+
+# Monolith nguồn gốc — chỉ giữ ở máy cá nhân để chép code khi tách service
+be/
+
+# Thư viện và bản build
+node_modules/
+dist/
