@@ -29,3 +29,4 @@ be/
 # Thư viện và bản build
 node_modules/
 dist/
+*.tsbuildinfo
