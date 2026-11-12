@@ -1,0 +1,11 @@
+// Mã lỗi dùng chung (standards/api-convention.md §6).
+export const GEN_ERROR = {
+  INVALID_INPUT: 'NT-GEN-0001',
+  UNAUTHORIZED: 'NT-GEN-0002',
+  FORBIDDEN: 'NT-GEN-0003',
+  NOT_FOUND: 'NT-GEN-0004',
+  CONFLICT: 'NT-GEN-0005',
+  INTERNAL: 'NT-GEN-0500',
+  UPSTREAM_UNAVAILABLE: 'NT-GEN-0503',
+  UPSTREAM_TIMEOUT: 'NT-GEN-0504',
+} as const;
