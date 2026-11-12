@@ -1,7 +1,7 @@
 # NexTech — chạy toàn hệ thống: `docker compose up -d`
 # Không cần .env: giá trị mặc định dev nằm ngay trong file này (guides/NT_Docker_Local_Guide.md).
 # Chỉ gateway và công cụ quan sát được mở cổng ra máy (security-policy §3).
-# T1.3: mới có hạ tầng. Gateway (T1.4) và 6 service thêm vào theo task của chúng.
+# Đã có: hạ tầng (T1.3), gateway (T1.4). 6 service thêm vào theo task của chúng.
 
 # Dùng chung cho các service Node ở các task sau
 x-service-defaults: &service-defaults
@@ -86,6 +86,35 @@ services:
       timeout: 3s
       retries: 20
     networks: [nextech]
+
+  # Cổng vào duy nhất của API (security-policy §3.2). Service chưa chạy thì trả 503 NT-GW-0503.
+  api-gateway:
+    <<: *service-defaults
+    build: { context: ., dockerfile: gateway/Dockerfile }
+    ports: ["8080:8080"]
+    environment:
+      PORT: 8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      JWT_SECRET: ${JWT_SECRET:-dev-access-secret}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      HTTP_TIMEOUT_MS: ${HTTP_TIMEOUT_MS:-2000}
+      PROXY_TIMEOUT_MS: ${PROXY_TIMEOUT_MS:-10000}
+      PROXY_TIMEOUT_AI_MS: ${PROXY_TIMEOUT_AI_MS:-80000}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-600}
+      RATE_LIMIT_AUTH_PER_MIN: ${RATE_LIMIT_AUTH_PER_MIN:-30}
+      RATE_LIMIT_AI_PER_MIN: ${RATE_LIMIT_AI_PER_MIN:-20}
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      CATALOG_SERVICE_URL: http://catalog-service:3002
+      PROMOTION_SERVICE_URL: http://promotion-service:3003
+      ORDER_SERVICE_URL: http://order-service:3004
+      NOTIFICATION_SERVICE_URL: http://notification-service:3006
+      ASSISTANT_SERVICE_URL: http://assistant-service:3007
+    healthcheck: &node-health
+      test: ["CMD", "node", "-e", "fetch('http://localhost:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
 networks:
   nextech:

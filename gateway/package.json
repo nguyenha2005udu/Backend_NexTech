@@ -1,0 +1,43 @@
+{
+  "name": "gateway",
+  "version": "0.1.0",
+  "description": "API Gateway NexTech: định tuyến, xác thực JWT, rate limit, không chứa nghiệp vụ",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "lint": "eslint \"src/**/*.ts\" --fix",
+    "test": "tsc --noEmit -p tsconfig.json && jest"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "testEnvironment": "node"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.2"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.4",
+    "http-proxy-middleware": "^3.0.10",
+    "jsonwebtoken": "^9.0.3"
+  }
+}
