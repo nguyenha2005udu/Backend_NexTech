@@ -1,0 +1,92 @@
+# NexTech — chạy toàn hệ thống: `docker compose up -d`
+# Không cần .env: giá trị mặc định dev nằm ngay trong file này (guides/NT_Docker_Local_Guide.md).
+# Chỉ gateway và công cụ quan sát được mở cổng ra máy (security-policy §3).
+# T1.3: mới có hạ tầng. Gateway (T1.4) và 6 service thêm vào theo task của chúng.
+
+# Dùng chung cho các service Node ở các task sau
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  mem_limit: 256m
+  networks: [nextech]
+
+x-common-env: &common-env
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+  RESILIENCE_ENABLED: ${RESILIENCE_ENABLED:-true}
+  HTTP_TIMEOUT_MS: ${HTTP_TIMEOUT_MS:-2000}
+  HTTP_RETRIES: ${HTTP_RETRIES:-2}
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_SSL: "false"
+  SEED_DEMO: ${SEED_DEMO:-true}
+
+x-rabbit-env: &rabbit-env
+  RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    ports: ["5433:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d notification_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    networks: [nextech]
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [nextech]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports: ["15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [nextech]
+
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports: ["8025:8025"]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [nextech]
+
+  payos-mock:
+    build: ./infra/payos-mock
+    environment:
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-dev-checksum}
+      WEBHOOK_URL: http://api-gateway:8080/api/webhooks/payos
+    ports: ["4010:4010"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4010/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [nextech]
+
+networks:
+  nextech:
+    name: nextech          # tên cố định, để k6 chạy cùng mạng
+
+volumes:
+  pgdata:
