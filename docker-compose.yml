@@ -116,6 +116,21 @@ services:
       timeout: 3s
       retries: 30
 
+  # NT.PROMOTION — mã giảm giá, lượt dùng mã (T2.1). Không mở cổng: chỉ đi qua gateway.
+  promotion-service:
+    <<: *service-defaults
+    build: { context: ., dockerfile: services/promotion/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      PORT: 3003
+      DB_USER: promotion_user
+      DB_PASS: promotion_pass
+      DB_NAME: promotion_db
+      DB_LOGGING: ${DB_LOGGING:-false}
+    healthcheck: *node-health
+
 networks:
   nextech:
     name: nextech          # tên cố định, để k6 chạy cùng mạng

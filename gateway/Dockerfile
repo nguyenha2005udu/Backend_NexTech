@@ -8,6 +8,7 @@ WORKDIR /repo
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/service-kit/package.json packages/service-kit/
 COPY gateway/package.json gateway/
+COPY services/promotion/package.json services/promotion/
 RUN npm ci
 
 COPY gateway gateway

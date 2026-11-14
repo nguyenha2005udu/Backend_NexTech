@@ -60,6 +60,19 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
+  // api-convention §5: giữ trường mặc định của NestJS — ConflictException của be/ có `error: 'Conflict'`
+  it.each([
+    [400, 'Bad Request'],
+    [404, 'Not Found'],
+    [409, 'Conflict'],
+  ])(
+    'BusinessException %i có trường error "%s" như exception của NestJS',
+    (status, error) => {
+      const r = run(new BusinessException(status, 'NT-X-1', 'm'));
+      expect(r.body).toMatchObject({ statusCode: status, error, message: 'm' });
+    },
+  );
+
   it('UpstreamBusinessError: giữ status, mã và message của service đích', () => {
     const r = run(
       new UpstreamBusinessError('catalog', 409, 'NT-CAT-1001', 'Hết hàng'),
