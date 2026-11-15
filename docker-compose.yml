@@ -44,6 +44,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Chỉ mở trên máy local cho test:int của identity (Redis thật), không ra mạng ngoài
+    ports: ["127.0.0.1:6380:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -129,6 +131,43 @@ services:
       DB_PASS: promotion_pass
       DB_NAME: promotion_db
       DB_LOGGING: ${DB_LOGGING:-false}
+    healthcheck: *node-health
+
+  # NT.IDENTITY — tài khoản, OTP, token, hồ sơ, địa chỉ (T2.2). Không mở cổng: chỉ đi qua gateway.
+  # Không depends_on mailpit: SMTP chết thì gửi OTP trả 503, service vẫn chạy.
+  identity-service:
+    <<: *service-defaults
+    build: { context: ., dockerfile: services/identity/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      PORT: 3001
+      DB_USER: identity_user
+      DB_PASS: identity_pass
+      DB_NAME: identity_db
+      DB_LOGGING: ${DB_LOGGING:-false}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_TLS: "false"
+      JWT_SECRET: ${JWT_SECRET:-dev-access-secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      MAIL_USER: no-reply@nextech.local
+      MAIL_PASS: dev
+      MAIL_REQUIRE_TLS: "false"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev}
+      GOOGLE_CALLBACK_URL: http://localhost:8080/api/auth/google/callback
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-dev}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-dev}
+      FACEBOOK_CALLBACK_URL: http://localhost:8080/api/auth/facebook/callback
+      REDIRECT_URI: ${REDIRECT_URI:-http://localhost:3000}
     healthcheck: *node-health
 
 networks:
