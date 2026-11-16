@@ -17,9 +17,10 @@ x-common-env: &common-env
   CB_VOLUME_THRESHOLD: ${CB_VOLUME_THRESHOLD:-5}
   CB_ERROR_PERCENT: ${CB_ERROR_PERCENT:-50}
   CB_RESET_MS: ${CB_RESET_MS:-10000}
-  DB_HOST: postgres
-  DB_PORT: 5432
-  DB_SSL: "false"
+  # Ghi đè được từ .env (ví dụ Postgres cloud). DB_USER/DB_PASS/DB_NAME/PORT riêng từng service, đặt ở khối của service
+  DB_HOST: ${DB_HOST:-postgres}
+  DB_PORT: ${DB_PORT:-5432}
+  DB_SSL: ${DB_SSL:-false}
   SEED_DEMO: ${SEED_DEMO:-true}
 
 x-rabbit-env: &rabbit-env
@@ -148,25 +149,27 @@ services:
       DB_PASS: identity_pass
       DB_NAME: identity_db
       DB_LOGGING: ${DB_LOGGING:-false}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_TLS: "false"
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_TLS: ${REDIS_TLS:-false}
       JWT_SECRET: ${JWT_SECRET:-dev-access-secret}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      MAIL_HOST: mailpit
-      MAIL_PORT: 1025
-      MAIL_USER: no-reply@nextech.local
-      MAIL_PASS: dev
-      MAIL_REQUIRE_TLS: "false"
+      # Mặc định Mailpit. SMTP thật (Gmail): đặt MAIL_* trong .env, MAIL_REQUIRE_TLS=true
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USER: ${MAIL_USER:-no-reply@nextech.local}
+      MAIL_PASS: ${MAIL_PASS:-dev}
+      MAIL_REQUIRE_TLS: ${MAIL_REQUIRE_TLS:-false}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev}
-      GOOGLE_CALLBACK_URL: http://localhost:8080/api/auth/google/callback
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:8080/api/auth/google/callback}
       FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-dev}
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-dev}
-      FACEBOOK_CALLBACK_URL: http://localhost:8080/api/auth/facebook/callback
+      FACEBOOK_CALLBACK_URL: ${FACEBOOK_CALLBACK_URL:-http://localhost:8080/api/auth/facebook/callback}
       REDIRECT_URI: ${REDIRECT_URI:-http://localhost:3000}
     healthcheck: *node-health
 
