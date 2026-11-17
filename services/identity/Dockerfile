@@ -9,6 +9,7 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/service-kit/package.json packages/service-kit/
 COPY gateway/package.json gateway/
 COPY services/identity/package.json services/identity/
+COPY services/catalog/package.json services/catalog/
 COPY services/promotion/package.json services/promotion/
 RUN npm ci
 

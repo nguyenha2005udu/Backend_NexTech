@@ -1,6 +1,6 @@
 // Chép nguyên từ be/src/admin/discountcode/discountcode.admin.dto.ts
 import { Type } from 'class-transformer';
-import { ToBoolean } from '../../common/transformers';
+import { ToBoolean } from '@nextech/service-kit';
 import {
   IsBoolean,
   IsDateString,
