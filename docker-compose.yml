@@ -119,6 +119,26 @@ services:
       timeout: 3s
       retries: 30
 
+  # NT.CATALOG — sản phẩm, danh mục, ngành hàng (T2.3). Không mở cổng: chỉ đi qua gateway.
+  catalog-service:
+    <<: *service-defaults
+    build: { context: ., dockerfile: services/catalog/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      PORT: 3002
+      DB_USER: catalog_user
+      DB_PASS: catalog_pass
+      DB_NAME: catalog_db
+      DB_LOGGING: ${DB_LOGGING:-false}
+      # Không có key thật: để disabled, upload file trả 503, nhập URL ảnh vẫn dùng được (NT.CATALOG API_Spec §5)
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-disabled}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-disabled}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-disabled}
+      # RABBITMQ_URL (T4.1), ORDER/IDENTITY_SERVICE_URL, PRICE_ALERT_CRON (T2.5) thêm khi có code dùng
+    healthcheck: *node-health
+
   # NT.PROMOTION — mã giảm giá, lượt dùng mã (T2.1). Không mở cổng: chỉ đi qua gateway.
   promotion-service:
     <<: *service-defaults

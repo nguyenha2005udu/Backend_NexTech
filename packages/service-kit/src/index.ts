@@ -31,6 +31,8 @@ export { OptionalGatewayUserGuard } from './auth/optional-gateway-user.guard';
 export { RolesGuard } from './auth/roles.guard';
 export { CurrentUser, Roles, ROLES_KEY } from './auth/decorators';
 
+export { ToBoolean } from './validation/to-boolean';
+
 export { HealthModule, type HealthModuleOptions } from './health/health.module';
 export {
   typeOrmHealthCheck,
