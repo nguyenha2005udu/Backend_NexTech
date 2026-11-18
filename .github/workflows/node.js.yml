@@ -37,10 +37,13 @@ jobs:
       id: filter
       with:
         filters: |
-          identity:  ['services/identity/**',  'packages/**', 'package-lock.json']
-          catalog:   ['services/catalog/**',   'packages/**', 'package-lock.json']
-          promotion: ['services/promotion/**', 'packages/**', 'package-lock.json']
-          gateway:   ['gateway/**',            'packages/**', 'package-lock.json']
+          identity:     ['services/identity/**',     'packages/**', 'package-lock.json']
+          catalog:      ['services/catalog/**',      'packages/**', 'package-lock.json']
+          promotion:    ['services/promotion/**',    'packages/**', 'package-lock.json']
+          order:        ['services/order/**',        'packages/**', 'package-lock.json']
+          notification: ['services/notification/**', 'packages/**', 'package-lock.json']
+          assistant:    ['services/assistant/**',    'packages/**', 'package-lock.json']
+          gateway:      ['gateway/**',               'packages/**', 'package-lock.json']
 
   deploy:
     needs: [build, changes]          # build hoặc test lỗi thì không deploy

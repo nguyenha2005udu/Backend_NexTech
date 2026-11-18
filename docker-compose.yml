@@ -1,7 +1,8 @@
 # NexTech — chạy toàn hệ thống: `docker compose up -d`
 # Không cần .env: giá trị mặc định dev nằm ngay trong file này (guides/NT_Docker_Local_Guide.md).
 # Chỉ gateway và công cụ quan sát được mở cổng ra máy (security-policy §3).
-# Đã có: hạ tầng (T1.3), gateway (T1.4). 6 service thêm vào theo task của chúng.
+# Đã có: hạ tầng (T1.3), gateway (T1.4), promotion (T2.1), identity (T2.2), catalog (T2.3),
+# khung order, notification, assistant (T1.6).
 
 # Dùng chung cho các service Node ở các task sau
 x-service-defaults: &service-defaults
@@ -192,6 +193,50 @@ services:
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-dev}
       FACEBOOK_CALLBACK_URL: ${FACEBOOK_CALLBACK_URL:-http://localhost:8080/api/auth/facebook/callback}
       REDIRECT_URI: ${REDIRECT_URI:-http://localhost:3000}
+    healthcheck: *node-health
+
+  # Khung T1.6: order, notification, assistant mới có database và /health, chưa có route nghiệp vụ
+  # (gọi qua gateway nhận 404 của service). Biến nghiệp vụ thêm ở T3.x, T4.2, T8.5. Không mở cổng.
+  order-service:
+    <<: *service-defaults
+    build: { context: ., dockerfile: services/order/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      PORT: 3004
+      DB_USER: order_user
+      DB_PASS: order_pass
+      DB_NAME: order_db
+      DB_LOGGING: ${DB_LOGGING:-false}
+    healthcheck: *node-health
+
+  notification-service:
+    <<: *service-defaults
+    build: { context: ., dockerfile: services/notification/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      PORT: 3006
+      DB_USER: notification_user
+      DB_PASS: notification_pass
+      DB_NAME: notification_db
+      DB_LOGGING: ${DB_LOGGING:-false}
+    healthcheck: *node-health
+
+  assistant-service:
+    <<: *service-defaults
+    build: { context: ., dockerfile: services/assistant/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      PORT: 3007
+      DB_USER: assistant_user
+      DB_PASS: assistant_pass
+      DB_NAME: assistant_db
+      DB_LOGGING: ${DB_LOGGING:-false}
     healthcheck: *node-health
 
 networks:

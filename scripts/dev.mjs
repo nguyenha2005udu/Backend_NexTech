@@ -1,8 +1,9 @@
 // Chạy service ở chế độ dev NGOÀI Docker, sửa code là tự build lại và khởi động lại.
 //
 //   npm run dev:infra                 → bật Postgres, Redis, Mailpit trong Docker, dừng container ứng dụng
-//   npm run dev                       → chạy identity, catalog, promotion, gateway
-//   npm run dev:identity              → chỉ một service (tương tự dev:catalog, dev:promotion, dev:gateway)
+//   npm run dev                       → chạy identity, catalog, promotion, order, notification, assistant, gateway
+//   npm run dev:identity              → chỉ một service (tương tự dev:catalog, dev:promotion, dev:order,
+//                                       dev:notification, dev:assistant, dev:gateway)
 //   node scripts/dev.mjs <thư mục>... → tự chọn
 //
 // Mỗi thư mục chạy `tsc --watch` (src → dist) và `node --watch dist/main.js`. Có thêm `tsc --watch`
@@ -22,7 +23,15 @@ import { parseEnv } from 'node:util';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
 const KIT = 'packages/service-kit';
-const ALL = ['services/identity', 'services/catalog', 'services/promotion', 'gateway'];
+const ALL = [
+  'services/identity',
+  'services/catalog',
+  'services/promotion',
+  'services/order',
+  'services/notification',
+  'services/assistant',
+  'gateway',
+];
 
 // util.parseEnv và --watch-path dùng được ổn định từ Node 22
 const [major] = process.versions.node.split('.').map(Number);

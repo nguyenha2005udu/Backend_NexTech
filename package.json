@@ -12,8 +12,11 @@
     "dev:identity": "node scripts/dev.mjs services/identity",
     "dev:catalog": "node scripts/dev.mjs services/catalog",
     "dev:promotion": "node scripts/dev.mjs services/promotion",
+    "dev:order": "node scripts/dev.mjs services/order",
+    "dev:notification": "node scripts/dev.mjs services/notification",
+    "dev:assistant": "node scripts/dev.mjs services/assistant",
     "dev:gateway": "node scripts/dev.mjs gateway",
-    "dev:infra": "docker compose --env-file .env.example up -d postgres redis mailpit && docker compose --env-file .env.example stop api-gateway identity-service catalog-service promotion-service",
+    "dev:infra": "docker compose --env-file .env.example up -d postgres redis mailpit && docker compose --env-file .env.example stop api-gateway identity-service catalog-service promotion-service order-service notification-service assistant-service",
     "docker:up": "docker compose --env-file .env.example up -d --build",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm test --workspaces --if-present"
