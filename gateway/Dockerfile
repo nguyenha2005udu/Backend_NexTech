@@ -11,6 +11,9 @@ COPY gateway/package.json gateway/
 COPY services/identity/package.json services/identity/
 COPY services/catalog/package.json services/catalog/
 COPY services/promotion/package.json services/promotion/
+COPY services/order/package.json services/order/
+COPY services/notification/package.json services/notification/
+COPY services/assistant/package.json services/assistant/
 RUN npm ci
 
 COPY gateway gateway
