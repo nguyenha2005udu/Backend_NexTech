@@ -8,6 +8,13 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "dev": "node scripts/dev.mjs",
+    "dev:identity": "node scripts/dev.mjs services/identity",
+    "dev:catalog": "node scripts/dev.mjs services/catalog",
+    "dev:promotion": "node scripts/dev.mjs services/promotion",
+    "dev:gateway": "node scripts/dev.mjs gateway",
+    "dev:infra": "docker compose --env-file .env.example up -d postgres redis mailpit && docker compose --env-file .env.example stop api-gateway identity-service catalog-service promotion-service",
+    "docker:up": "docker compose --env-file .env.example up -d --build",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm test --workspaces --if-present"
   },
