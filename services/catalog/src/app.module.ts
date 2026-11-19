@@ -11,6 +11,8 @@ import { CategoryModule } from './modules/category/category.module';
 import { IndustryModule } from './modules/industry/industry.module';
 import { AdminProductModule } from './modules/admin-product/product.admin.module';
 import { AdminCategoryModule } from './modules/admin-category/category.admin.module';
+import { StockModule } from './modules/stock/stock.module';
+import { InternalModule } from './internal/internal.module';
 
 @Module({
   imports: [
@@ -29,7 +31,9 @@ import { AdminCategoryModule } from './modules/admin-category/category.admin.mod
     IndustryModule,
     AdminProductModule,
     AdminCategoryModule,
-    // price-alert (T2.5), stock + internal (T2.4)
+    StockModule,
+    InternalModule,
+    // price-alert (T2.5)
   ],
 })
 export class AppModule implements OnApplicationBootstrap {
