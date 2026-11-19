@@ -11,7 +11,7 @@
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "test": "tsc --noEmit -p tsconfig.json && jest",
-    "test:int": "jest --runInBand --testRegex \"\\.int-spec\\.ts$\"",
+    "test:int": "jest --runInBand --testRegex \"\\.int-spec\\.ts$\" --",
     "migration:generate": "npm run build && typeorm migration:generate -d dist/database/data-source.js",
     "migration:run": "npm run build && typeorm migration:run -d dist/database/data-source.js"
   },
