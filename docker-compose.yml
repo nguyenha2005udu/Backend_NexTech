@@ -121,7 +121,7 @@ services:
       timeout: 3s
       retries: 30
 
-  # NT.CATALOG — sản phẩm, danh mục, ngành hàng (T2.3). Không mở cổng: chỉ đi qua gateway.
+  # NT.CATALOG — sản phẩm, danh mục, ngành hàng (T2.3), giữ kho (T2.4), đánh giá, theo dõi giá (T2.5). Không mở cổng: chỉ đi qua gateway.
   catalog-service:
     <<: *service-defaults
     build: { context: ., dockerfile: services/catalog/Dockerfile }
@@ -138,7 +138,12 @@ services:
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-disabled}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-disabled}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-disabled}
-      # RABBITMQ_URL (T4.1), ORDER/IDENTITY_SERVICE_URL, PRICE_ALERT_CRON (T2.5) thêm khi có code dùng
+      # Tạo đánh giá hỏi order (đã mua chưa) và identity (tên người viết) — NT.CATALOG API_Spec §3 (T2.5)
+      ORDER_SERVICE_URL: http://order-service:3004
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      # Cron theo dõi giá, demo đặt "* * * * *" (API_Spec §5)
+      PRICE_ALERT_CRON: ${PRICE_ALERT_CRON:-*/10 * * * *}
+      # RABBITMQ_URL thêm ở T4.1
     healthcheck: *node-health
 
   # NT.PROMOTION — mã giảm giá, lượt dùng mã (T2.1). Không mở cổng: chỉ đi qua gateway.

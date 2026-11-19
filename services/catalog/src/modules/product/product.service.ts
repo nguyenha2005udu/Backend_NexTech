@@ -1,15 +1,18 @@
 // Chép từ be/src/users/product/product.service.ts. Đổi do tách service (Component_Class_Design §2):
 // - NotFoundException('Không tìm thấy sản phẩm') → BusinessException NT-CAT-1005 (giữ câu chữ).
 // - findReviews: bỏ relations user, đọc snapshot user_name/user_avatar_url.
-// - Bỏ orderItemRepo, import Order/OrderItem/User. createReview tạm trả 503 tới T2.5
-//   (gọi OrderClient.hasPurchased, IdentityClient.getUser — Processing_Flow §3).
-import { Injectable } from '@nestjs/common';
+// - Bỏ orderItemRepo, import Order/OrderItem/User. createReview hỏi order qua OrderClient (BR-11) thay JOIN
+//   order_items, lưu snapshot tên từ IdentityClient (Processing_Flow §3, T2.5). Lỗi có mã NT-CAT-1006/1007.
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { UpstreamError } from '@nextech/service-kit';
+import { BusinessException } from '@nextech/service-kit';
 import { Repository } from 'typeorm';
 import { Product } from '../../database/entities/product.entity';
 import { ProductReview } from '../../database/entities/product-review.entity';
-import { productNotFound } from '../../errors';
+import { IdentityClient } from '../../clients/identity.client';
+import { OrderClient } from '../../clients/order.client';
+import { isUniqueViolation } from '../../database/unique-violation';
+import { CAT_ERROR, productNotFound } from '../../errors';
 import {
   CreateProductReviewDto,
   QueryProductDto,
@@ -23,6 +26,8 @@ export class ProductService {
     private readonly productRepo: Repository<Product>,
     @InjectRepository(ProductReview)
     private readonly reviewRepo: Repository<ProductReview>,
+    private readonly orders: OrderClient,
+    private readonly identity: IdentityClient,
   ) {}
 
   // ---------- GET /api/products ----------
@@ -204,19 +209,64 @@ export class ProductService {
 
   // ---------- POST /api/products/:id/reviews ----------
   // Tạm thời tới T2.5: BR-11 cần hỏi order-service đã mua chưa (Processing_Flow §3).
-  // eslint-disable-next-line @typescript-eslint/require-await
+
+  /**
+   * BR-11 (be/ createReview + NT.CATALOG Processing_Flow §3). Không bọc transaction: không giữ
+   * transaction khi gọi HTTP (coding-convention §4). Số truy vấn 3 (sản phẩm, đã đánh giá, chèn),
+   * lời gọi HTTP 2 cố định (order, identity).
+   */
   async createReview(
     productId: string,
     userId: string,
     dto: CreateProductReviewDto,
   ): Promise<ProductReview> {
-    void productId;
-    void userId;
-    void dto;
-    throw new UpstreamError(
-      'order',
-      'Tạo đánh giá chưa nối order-service (T2.5)',
-      'not_executed',
-    );
+    // be/: chỉ kiểm tồn tại, không lọc is_active
+    const product = await this.productRepo.findOne({
+      where: { id: productId },
+    });
+    if (!product) throw productNotFound();
+
+    // Order lỗi → 503/504 (OrderClient), không tạo
+    if (!(await this.orders.hasPurchased(userId, productId))) {
+      throw new BusinessException(
+        HttpStatus.FORBIDDEN,
+        CAT_ERROR.REVIEW_NOT_PURCHASED,
+        'Bạn cần mua sản phẩm này (đơn hàng đã hoàn tất) trước khi đánh giá',
+      );
+    }
+
+    const existed = await this.reviewRepo.findOne({
+      where: { product_id: productId, user_id: userId },
+    });
+    if (existed) throw reviewExists();
+
+    // Identity lỗi → null: vẫn tạo, hiển thị "Ẩn danh" (API_Spec §3)
+    const snapshot = await this.identity.getUserSnapshot(userId);
+
+    const review = this.reviewRepo.create({
+      product_id: productId,
+      user_id: userId,
+      user_name: snapshot?.full_name ?? null,
+      user_avatar_url: snapshot?.avatar_url ?? null,
+      rating: String(dto.rating),
+      title: dto.title ?? null,
+      content: dto.content ?? null,
+    });
+    try {
+      return await this.reviewRepo.save(review);
+    } catch (err) {
+      // Hai request cùng lúc cùng vượt bước kiểm tra đọc: unique index chặn, trả đúng mã như trên (B1)
+      if (isUniqueViolation(err, 'ux_reviews_user_product')) {
+        throw reviewExists();
+      }
+      throw err;
+    }
   }
 }
+
+const reviewExists = () =>
+  new BusinessException(
+    HttpStatus.FORBIDDEN,
+    CAT_ERROR.REVIEW_EXISTS,
+    'Bạn đã đánh giá sản phẩm này rồi',
+  );

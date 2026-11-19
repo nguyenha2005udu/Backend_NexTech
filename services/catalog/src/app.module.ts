@@ -1,6 +1,7 @@
 import { Logger, Module, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
 import { HealthModule, typeOrmHealthCheck } from '@nextech/service-kit';
 import configuration from './config/configuration';
@@ -13,6 +14,7 @@ import { AdminProductModule } from './modules/admin-product/product.admin.module
 import { AdminCategoryModule } from './modules/admin-category/category.admin.module';
 import { StockModule } from './modules/stock/stock.module';
 import { InternalModule } from './internal/internal.module';
+import { PriceAlertModule } from './modules/price-alert/price-alert.module';
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { InternalModule } from './internal/internal.module';
     TypeOrmModule.forRootAsync({
       useFactory: () => ({ ...dataSourceOptions(), migrationsRun: true }),
     }),
+    // Cron theo dõi giá (PRICE_ALERT_CRON, T2.5)
+    ScheduleModule.forRoot(),
     // RabbitMQ (T4.1) chỉ báo trạng thái, không làm /health 503 (reliability-standard §5)
     HealthModule.forRoot({
       service: 'catalog',
@@ -33,7 +37,7 @@ import { InternalModule } from './internal/internal.module';
     AdminCategoryModule,
     StockModule,
     InternalModule,
-    // price-alert (T2.5)
+    PriceAlertModule,
   ],
 })
 export class AppModule implements OnApplicationBootstrap {
