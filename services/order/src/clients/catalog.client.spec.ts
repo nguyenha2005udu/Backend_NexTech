@@ -130,4 +130,12 @@ describe('CatalogClient', () => {
       );
     });
   });
+
+  it('release chuyển deadline xuống request (hoàn tác trong request, NT.CHECKOUT_SAGA v1.6)', async () => {
+    request.mockResolvedValue({ status: 'released', restored: true });
+    await client.release('o1', { deadline: 77 });
+    expect(request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadline: 77 }),
+    );
+  });
 });

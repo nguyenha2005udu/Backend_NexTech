@@ -1,7 +1,49 @@
 // Kiểu và hàm nhỏ của saga đặt hàng (NT.CHECKOUT_SAGA Component_Class_Design §3–4). Chỉ saga dùng.
 import type { HttpException } from '@nestjs/common';
-import { BusinessException, GEN_ERROR } from '@nextech/service-kit';
+import {
+  BusinessException,
+  codeForStatus,
+  GEN_ERROR,
+  UpstreamBusinessError,
+  UpstreamError,
+} from '@nextech/service-kit';
 import type { Order } from '../../database/entities/order.entity';
+
+// orders.failure_code là varchar(30) (NT.ORDER API_Spec §5)
+const FAILURE_CODE_MAX = 30;
+
+// Lỗi làm saga thất bại → cột failure_* (Component_Class_Design §6, v1.6). Mã giống mã AllExceptionsFilter
+// trả cho client: đích không gửi code thì codeForStatus (service-kit).
+export function failureFieldsOf(reason: HttpException): {
+  failure_code: string;
+  failure_message: string;
+  failure_status: number;
+} {
+  const status = reason.getStatus();
+  let code: string;
+  if (reason instanceof UpstreamBusinessError) {
+    code = reason.upstreamCode ?? codeForStatus(status);
+  } else if (
+    reason instanceof UpstreamError ||
+    reason instanceof BusinessException
+  ) {
+    code = reason.code;
+  } else {
+    code = codeForStatus(status);
+  }
+  const res = reason.getResponse();
+  // getResponse(): chuỗi, mảng (UpstreamBusinessError giữ message mảng của đích) hoặc { message }
+  const raw = Array.isArray(res)
+    ? res
+    : typeof res === 'object' && res !== null && 'message' in res
+      ? res.message
+      : reason.message;
+  return {
+    failure_code: code.slice(0, FAILURE_CODE_MAX),
+    failure_message: Array.isArray(raw) ? raw.join('; ') : String(raw),
+    failure_status: status,
+  };
+}
 
 // orders.saga_step (API_Spec §3)
 export type SagaStep =

@@ -1,4 +1,6 @@
+import type { HttpException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { UpstreamBusinessError, UpstreamError } from '@nextech/service-kit';
 import { randomUUID } from 'node:crypto';
 import { EntityManager } from 'typeorm';
 import type { CatalogClient } from '../../clients/catalog.client';
@@ -6,13 +8,15 @@ import type { IdentityClient } from '../../clients/identity.client';
 import type { PromotionClient } from '../../clients/promotion.client';
 import { Cart } from '../../database/entities/cart.entity';
 import { Order } from '../../database/entities/order.entity';
+import { SagaTask } from '../../database/entities/saga-task.entity';
 import { countQueries, createTestDb, TestDb } from '../../test-helpers';
 import { CheckoutSagaService } from './checkout-saga.service';
 import { CheckoutService } from './checkout.service';
+import { CompensationService } from './compensation.service';
 
 // POSTGRES THẬT, client giả. Chạy: docker compose up -d postgres && npm run test:int -w services/order -- checkout
 // NT.CHECKOUT_SAGA Component_Class_Design §8: test 1, 2, 3, 13 (confirm hai lần), 15, 16; số truy vấn
-// theo Processing_Flow §1 (v1.5): 8–10.
+// theo Processing_Flow §1 (v1.5): 8–10. T3.4: khối "hoàn tác" — test 4–10, 14, 19, 20, 23–25 (v1.6).
 
 jest.setTimeout(60_000);
 
@@ -33,17 +37,30 @@ describe('CheckoutService (Postgres thật)', () => {
   const P3 = randomUUID();
 
   const identity = { getAddress: jest.fn(), getUser: jest.fn() };
-  const catalog = { getProducts: jest.fn(), reserve: jest.fn() };
-  const promotion = { redeem: jest.fn() };
+  const catalog = {
+    getProducts: jest.fn(),
+    reserve: jest.fn(),
+    release: jest.fn(),
+  };
+  const promotion = { redeem: jest.fn(), release: jest.fn() };
+  let compensation: CompensationService;
 
   beforeAll(async () => {
     db = await createTestDb();
     const orders = db.ds.getRepository(Order);
+    compensation = new CompensationService(
+      orders,
+      db.ds.getRepository(SagaTask),
+      db.ds,
+      catalog as unknown as CatalogClient,
+      promotion as unknown as PromotionClient,
+    );
     saga = new CheckoutSagaService(
       orders,
       db.ds,
       catalog as unknown as CatalogClient,
       promotion as unknown as PromotionClient,
+      compensation,
     );
     service = new CheckoutService(
       db.ds.getRepository(Cart),
@@ -83,6 +100,8 @@ describe('CheckoutService (Postgres thật)', () => {
       { id: P3, name: 'Sạc', price: 400000, is_active: true, image: null },
     ]);
     catalog.reserve.mockResolvedValue({ status: 'reserved' });
+    catalog.release.mockResolvedValue({ status: 'released', restored: true });
+    promotion.release.mockResolvedValue({ status: 'released', restored: true });
     promotion.redeem.mockResolvedValue({
       status: 'redeemed',
       discount_code_id: randomUUID(),
@@ -353,5 +372,315 @@ describe('CheckoutService (Postgres thật)', () => {
     });
     expect(identity.getAddress).not.toHaveBeenCalled();
     expect(await ordersOf(u)).toHaveLength(0);
+  });
+  describe('hoàn tác (T3.4)', () => {
+    const outOfStock = () =>
+      new UpstreamBusinessError(
+        'catalog',
+        409,
+        'NT-CAT-1001',
+        'Sản phẩm "Tai nghe" không đủ hàng trong kho',
+      );
+    const codeExhausted = () =>
+      new UpstreamBusinessError(
+        'promotion',
+        400,
+        'NT-PRM-1006',
+        'Mã đã hết lượt sử dụng',
+      );
+    const refused = (t: string) =>
+      new UpstreamError(t, 'ECONNREFUSED', 'not_executed');
+    const timeout = (t: string) =>
+      new UpstreamError(t, 'timeout', 'unknown', 504);
+
+    const tasksOf = (orderId: string) =>
+      db.ds
+        .getRepository(SagaTask)
+        .find({ where: { order_id: orderId }, order: { seq: 'ASC' } });
+    type Caught = HttpException & { code?: string; upstreamCode?: string };
+    const errorOf = (p: Promise<unknown>): Promise<Caught> =>
+      p.then(
+        () => {
+          throw new Error('không ném lỗi');
+        },
+        (e: unknown) => e as Caught,
+      );
+
+    it('test 4: giữ kho 409 → 409 mã gốc, không gọi promotion, nhả kho, failed/compensated, giỏ còn nguyên; 8 truy vấn', async () => {
+      const u = randomUUID();
+      const lines = await seedCart(u, [[P1, 1]]);
+      catalog.reserve.mockRejectedValue(outOfStock());
+
+      const q = countQueries();
+      const e = await errorOf(
+        service.checkout(u, { address_id: randomUUID() }),
+      );
+      const n = q.count;
+      q.restore();
+
+      expect(e.getStatus()).toBe(409);
+      expect(e.upstreamCode).toBe('NT-CAT-1001');
+      expect(promotion.redeem).not.toHaveBeenCalled();
+      expect(catalog.release).toHaveBeenCalledTimes(1);
+      const [o] = await ordersOf(u);
+      expect(o).toMatchObject({
+        status: 'failed',
+        saga_step: 'compensated',
+        failure_code: 'NT-CAT-1001',
+        failure_status: 409,
+      });
+      expect((await tasksOf(o.id)).map((t) => [t.type, t.status])).toEqual([
+        ['release_stock', 'done'],
+      ]);
+      expect(await cartItemIds(u)).toEqual(lines);
+      // giỏ 1 + tạo đơn 2 + start 2 + run (SELECT + done) 2 + finish 1
+      expect(n).toBe(8);
+    });
+
+    it('giữ kho 409 khi có mã → vẫn nhả cả mã (tombstone) dù chưa dùng mã', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      catalog.reserve.mockRejectedValue(outOfStock());
+
+      await errorOf(
+        service.checkout(u, {
+          address_id: randomUUID(),
+          discount_code: 'SALE10',
+        }),
+      );
+
+      const [o] = await ordersOf(u);
+      expect((await tasksOf(o.id)).map((t) => [t.type, t.status])).toEqual([
+        ['release_promotion', 'done'],
+        ['release_stock', 'done'],
+      ]);
+      expect(promotion.redeem).not.toHaveBeenCalled();
+      expect(promotion.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('test 5 + 14: dùng mã 4xx → 4xx, nhả mã rồi nhả kho, mỗi lệnh một lần, failed; 10 truy vấn', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      promotion.redeem.mockRejectedValue(codeExhausted());
+      const calls: string[] = [];
+      promotion.release.mockImplementation(() => {
+        calls.push('promotion');
+        return Promise.resolve({ status: 'released', restored: false });
+      });
+      catalog.release.mockImplementation(() => {
+        calls.push('catalog');
+        return Promise.resolve({ status: 'released', restored: true });
+      });
+
+      const q = countQueries();
+      const e = await errorOf(
+        service.checkout(
+          u,
+          { address_id: randomUUID(), discount_code: 'HETLUOT' },
+          'k5',
+        ),
+      );
+      const n = q.count;
+      q.restore();
+
+      expect(e.getStatus()).toBe(400);
+      expect(e.upstreamCode).toBe('NT-PRM-1006');
+      expect(calls).toEqual(['promotion', 'catalog']);
+      const [o] = await ordersOf(u);
+      expect(o).toMatchObject({
+        status: 'failed',
+        saga_step: 'compensated',
+        idempotency_key: 'k5',
+      });
+      // key 1 + giỏ 1 + tạo đơn 2 + setStep 1 + start 2 + run 2 + finish 1
+      expect(n).toBe(10);
+    });
+
+    it('test 6 + 23: giữ kho not_executed → 503, failed; nhả key → gửi lại cùng key tạo đơn mới', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      catalog.reserve.mockRejectedValueOnce(refused('catalog'));
+
+      const e = await errorOf(
+        service.checkout(u, { address_id: randomUUID() }, 'k6'),
+      );
+      expect(e.getStatus()).toBe(503);
+      const [first] = await ordersOf(u);
+      expect(first).toMatchObject({
+        status: 'failed',
+        failure_code: 'NT-GEN-0503',
+        idempotency_key: null,
+      });
+
+      const r = await service.checkout(u, { address_id: randomUUID() }, 'k6');
+      expect(r.status).toBe(201);
+      expect(r.body.id).not.toBe(first.id);
+      expect(await ordersOf(u)).toHaveLength(2);
+    });
+
+    it('test 24: giữ kho 409 rồi gửi lại cùng key → 409 mã cũ, không chạy saga lần hai', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      catalog.reserve.mockRejectedValue(outOfStock());
+      await errorOf(service.checkout(u, { address_id: randomUUID() }, 'k24'));
+
+      const e = await errorOf(
+        service.checkout(u, { address_id: randomUUID() }, 'k24'),
+      );
+
+      expect(e.getStatus()).toBe(409);
+      expect(e.code).toBe('NT-CAT-1001');
+      expect(catalog.reserve).toHaveBeenCalledTimes(1);
+      expect(await ordersOf(u)).toHaveLength(1);
+    });
+
+    it('test 7: giữ kho unknown → 202, processing, chưa hoàn tác', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      catalog.reserve.mockRejectedValue(timeout('catalog'));
+
+      const r = await service.checkout(u, { address_id: randomUUID() });
+
+      expect(r.status).toBe(202);
+      const [o] = await ordersOf(u);
+      expect(o).toMatchObject({
+        status: 'processing',
+        saga_step: 'started',
+        notify_on_finish: true,
+      });
+      expect(await tasksOf(o.id)).toHaveLength(0);
+      expect(catalog.release).not.toHaveBeenCalled();
+    });
+
+    it('test 9: dùng mã unknown → 202, kho vẫn giữ', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      promotion.redeem.mockRejectedValue(timeout('promotion'));
+
+      const r = await service.checkout(u, {
+        address_id: randomUUID(),
+        discount_code: 'SALE10',
+      });
+
+      expect(r.status).toBe(202);
+      const [o] = await ordersOf(u);
+      expect(o).toMatchObject({
+        status: 'processing',
+        saga_step: 'stock_reserved',
+      });
+      expect(catalog.release).not.toHaveBeenCalled();
+    });
+
+    it('test 8: dùng mã not_executed, promotion vẫn chết → 503, kho nhả ngay, đơn compensating chờ nhả mã', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      promotion.redeem.mockRejectedValue(refused('promotion'));
+      promotion.release.mockRejectedValue(refused('promotion'));
+
+      const e = await errorOf(
+        service.checkout(u, {
+          address_id: randomUUID(),
+          discount_code: 'SALE10',
+        }),
+      );
+
+      expect(e.getStatus()).toBe(503);
+      expect(catalog.release).toHaveBeenCalledTimes(1);
+      const [o] = await ordersOf(u);
+      expect(o).toMatchObject({
+        status: 'processing',
+        saga_step: 'compensating',
+      });
+      const ts = await tasksOf(o.id);
+      expect(ts.map((t) => [t.type, t.status, t.attempts])).toEqual([
+        ['release_promotion', 'pending', 1],
+        ['release_stock', 'done', 0],
+      ]);
+      expect(ts[0].last_error).toBe('promotion ECONNREFUSED (not_executed)');
+    });
+
+    it('test 10: nhả kho lỗi → compensating; chạy lại (thay cron T3.5) → failed, chỉ nhả task còn tồn', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      catalog.reserve.mockRejectedValue(outOfStock());
+      catalog.release.mockRejectedValueOnce(refused('catalog'));
+
+      await errorOf(service.checkout(u, { address_id: randomUUID() }));
+      const [o] = await ordersOf(u);
+      expect(o).toMatchObject({
+        status: 'processing',
+        saga_step: 'compensating',
+      });
+
+      await compensation.run(o.id);
+
+      expect(catalog.release).toHaveBeenCalledTimes(2);
+      const [after] = await ordersOf(u);
+      expect(after).toMatchObject({
+        status: 'failed',
+        saga_step: 'compensated',
+      });
+      expect((await tasksOf(o.id))[0]).toMatchObject({
+        status: 'done',
+        attempts: 1,
+      });
+    });
+
+    it('test 25: đơn cũ đang compensating không khoá giỏ → đặt lại được ngay', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      catalog.reserve.mockRejectedValueOnce(outOfStock());
+      catalog.release.mockRejectedValueOnce(refused('catalog'));
+      await errorOf(service.checkout(u, { address_id: randomUUID() }));
+
+      const r = await service.checkout(u, { address_id: randomUUID() });
+
+      expect(r.status).toBe(201);
+      const statuses = (await ordersOf(u))
+        .map((o) => `${o.status}/${o.saga_step}`)
+        .sort();
+      expect(statuses).toEqual([
+        'pending/confirmed',
+        'processing/compensating',
+      ]);
+    });
+
+    it('test 19: request và cron cùng startForFailedSaga → một bộ task, nhả một lần', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      jest
+        .spyOn(saga, 'advance')
+        .mockImplementationOnce((o) =>
+          Promise.resolve({ kind: 'in_doubt', order: o }),
+        );
+      await service.checkout(u, {
+        address_id: randomUUID(),
+        discount_code: 'SALE10',
+      });
+      jest.restoreAllMocks();
+      const [o] = await ordersOf(u);
+
+      await Promise.all([
+        compensation.startForFailedSaga(o, outOfStock()),
+        compensation.startForFailedSaga(o, refused('catalog')),
+      ]);
+
+      expect(await tasksOf(o.id)).toHaveLength(2);
+      expect(catalog.release).toHaveBeenCalledTimes(1);
+      expect(promotion.release).toHaveBeenCalledTimes(1);
+      const [after] = await ordersOf(u);
+      expect(after.status).toBe('failed');
+    });
+
+    it('test 20: finish muộn khi đơn đã pending → không đổi', async () => {
+      const u = randomUUID();
+      await seedCart(u, [[P1, 1]]);
+      const r = await service.checkout(u, { address_id: randomUUID() });
+
+      await compensation.run(r.body.id);
+
+      const [o] = await ordersOf(u);
+      expect(o).toMatchObject({ status: 'pending', saga_step: 'confirmed' });
+    });
   });
 });

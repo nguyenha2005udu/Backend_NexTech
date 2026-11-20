@@ -2,10 +2,11 @@
 // Thay đoạn giữa của be/src/users/order/order.service.ts checkout: reserveStock (dòng 127–131),
 // consumeDiscount (dòng 248–249), xoá dòng giỏ (dòng 252) — nay là lời gọi catalog, promotion và một
 // transaction xác nhận. Không giữ transaction nào trong lúc gọi HTTP.
-// T3.3: luồng thành công. Lỗi từ service đích ném lại (handleError, hoàn tác ở T3.4); outbox
-// order.created ở T4.1; payment_expires_at ở T3.10.
-import { Injectable } from '@nestjs/common';
+// T3.3: luồng thành công. T3.4: handleError theo Processing_Flow §3 (hoàn tác qua CompensationService).
+// Outbox order.created ở T4.1; payment_expires_at ở T3.10.
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { UpstreamBusinessError, UpstreamError } from '@nextech/service-kit';
 import { DataSource, In, Not, Repository } from 'typeorm';
 import { CatalogClient } from '../../clients/catalog.client';
 import {
@@ -14,6 +15,7 @@ import {
 } from '../../clients/promotion.client';
 import { CartItem } from '../../database/entities/cart-item.entity';
 import { Order } from '../../database/entities/order.entity';
+import { CompensationService } from './compensation.service';
 import { totalOf } from './order-pricing';
 import {
   isBudgetExhausted,
@@ -37,12 +39,15 @@ type StepAmounts = Partial<
 
 @Injectable()
 export class CheckoutSagaService {
+  private readonly logger = new Logger(CheckoutSagaService.name);
+
   constructor(
     @InjectRepository(Order)
     private readonly orders: Repository<Order>,
     private readonly dataSource: DataSource,
     private readonly catalog: CatalogClient,
     private readonly promotion: PromotionClient,
+    private readonly compensation: CompensationService,
   ) {}
 
   /**
@@ -81,8 +86,35 @@ export class CheckoutSagaService {
         // Bên khác đã đổi đơn: không hoàn tác, không xác nhận
         return toOutcome(await this.orders.findOneByOrFail({ id: order.id }));
       }
-      throw err; // T3.4 thay bằng handleError (hoàn tác hoặc in_doubt theo outcome)
+      return this.handleError(order, err, deadline);
     }
+  }
+
+  // Processing_Flow §3. `order` là trạng thái tới bước vừa lỗi (đã qua setStep trước đó).
+  private async handleError(
+    order: Order,
+    err: unknown,
+    deadline?: number,
+  ): Promise<SagaOutcome> {
+    // 4xx từ service đích: kết luận được → hoàn tác
+    if (err instanceof UpstreamBusinessError) {
+      await this.compensation.startForFailedSaga(order, err, deadline);
+      return { kind: 'failed', error: err };
+    }
+    if (err instanceof UpstreamError) {
+      // Chắc chắn chưa tới đích (từ chối kết nối, mạch mở) → hoàn tác phần đã làm
+      if (err.outcome === 'not_executed') {
+        await this.compensation.startForFailedSaga(order, err, deadline);
+        return { kind: 'failed', error: err };
+      }
+      // Không rõ đích đã xử lý chưa (timeout, 5xx): giữ processing, đối soát làm tiếp
+      this.logger.warn(
+        `Saga ${order.id} chưa rõ kết quả ở ${err.target} (${err.reason})`,
+      );
+      return { kind: 'in_doubt', order };
+    }
+    // Lỗi DB, hoặc RESILIENCE_ENABLED=false (lỗi thô): baseline "chưa xử lý" cho thí nghiệm
+    throw err;
   }
 
   // Số tiền giảm do promotion tính (BR-05, discount-calculator); order chỉ cộng trừ ra total

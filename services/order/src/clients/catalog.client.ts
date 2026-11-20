@@ -74,11 +74,12 @@ export class CatalogClient {
   }
 
   /** Nhả kho, idempotent, luôn 200 (tạo tombstone nếu chưa giữ). */
-  release(orderId: string): Promise<ReleaseResult> {
+  release(orderId: string, opts: CallOptions = {}): Promise<ReleaseResult> {
     return this.http.request({
       method: 'DELETE',
       path: `/internal/stock-reservations/${encodeURIComponent(orderId)}`,
       retry: true,
+      deadline: opts.deadline,
     });
   }
 

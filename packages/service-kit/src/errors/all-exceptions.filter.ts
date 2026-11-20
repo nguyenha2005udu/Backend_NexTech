@@ -11,7 +11,7 @@ import { QueryFailedError } from 'typeorm';
 import { currentRequestId } from '../context/request-context';
 import { UpstreamBusinessError, UpstreamError } from '../http/errors';
 import { BusinessException } from './business.exception';
-import { GEN_ERROR } from './codes';
+import { codeForStatus, GEN_ERROR } from './codes';
 
 // Lỗi Postgres do input của client -> 4xx thay vì 500.
 // Chép từ be/src/common/query-failed.filter.ts, thêm mã NT-GEN-*.
@@ -35,26 +35,6 @@ const PG_ERRORS: Record<
     message: 'Dữ liệu đang được tham chiếu bởi bản ghi khác',
   },
 };
-
-// Bảng api-convention §6
-const CODE_BY_STATUS: Record<number, string> = {
-  400: GEN_ERROR.INVALID_INPUT,
-  401: GEN_ERROR.UNAUTHORIZED,
-  403: GEN_ERROR.FORBIDDEN,
-  404: GEN_ERROR.NOT_FOUND,
-  409: GEN_ERROR.CONFLICT,
-  500: GEN_ERROR.INTERNAL,
-  503: GEN_ERROR.UPSTREAM_UNAVAILABLE,
-  504: GEN_ERROR.UPSTREAM_TIMEOUT,
-};
-
-// Status không có trong bảng: 5xx -> NT-GEN-0500, 4xx khác -> NT-GEN-0001 [cần xác nhận]
-function codeForStatus(status: number): string {
-  return (
-    CODE_BY_STATUS[status] ??
-    (status >= 500 ? GEN_ERROR.INTERNAL : GEN_ERROR.INVALID_INPUT)
-  );
-}
 
 type ErrorBody = Record<string, unknown> & { statusCode: number };
 

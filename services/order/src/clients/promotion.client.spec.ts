@@ -70,4 +70,12 @@ describe('PromotionClient', () => {
       expect.objectContaining({ deadline: 9 }),
     );
   });
+
+  it('release chuyển deadline xuống request (NT.CHECKOUT_SAGA v1.6)', async () => {
+    request.mockResolvedValue({ status: 'released', restored: false });
+    await client.release('o1', { deadline: 88 });
+    expect(request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadline: 88 }),
+    );
+  });
 });

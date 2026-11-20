@@ -16,7 +16,7 @@ export {
 
 export { BusinessException } from './errors/business.exception';
 export { AllExceptionsFilter } from './errors/all-exceptions.filter';
-export { GEN_ERROR } from './errors/codes';
+export { codeForStatus, GEN_ERROR } from './errors/codes';
 
 export {
   RequestContextMiddleware,
