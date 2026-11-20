@@ -1,6 +1,7 @@
 import {
   DB_REQUIRED,
   assertRequiredEnv,
+  checkoutConfig,
   databaseConfig,
   servicesConfig,
 } from './configuration';
@@ -70,5 +71,33 @@ describe('servicesConfig', () => {
         PROMOTION_SERVICE_URL: 'p',
       }),
     ).toEqual({ identityUrl: 'i', catalogUrl: 'c', promotionUrl: 'p' });
+  });
+});
+
+// NT.ORDER API_Spec §4, NT.CHECKOUT_SAGA API_Spec §5: có mặc định, không bắt buộc
+describe('checkoutConfig', () => {
+  it('không đặt biến → mặc định 30000, 500000, 8000, 120000', () => {
+    expect(checkoutConfig({})).toEqual({
+      shippingFee: 30000,
+      freeShippingThreshold: 500000,
+      budgetMs: 8000,
+      deadlineMs: 120000,
+    });
+  });
+
+  it('đọc biến thành số', () => {
+    expect(
+      checkoutConfig({
+        SHIPPING_FEE: '15000',
+        FREE_SHIPPING_THRESHOLD: '100000',
+        SAGA_BUDGET_MS: '3000',
+        SAGA_DEADLINE_MS: '60000',
+      }),
+    ).toEqual({
+      shippingFee: 15000,
+      freeShippingThreshold: 100000,
+      budgetMs: 3000,
+      deadlineMs: 60000,
+    });
   });
 });

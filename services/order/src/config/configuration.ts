@@ -24,6 +24,14 @@ export interface ServicesConfig {
   promotionUrl: string;
 }
 
+/** NT.ORDER API_Spec §4, NT.CHECKOUT_SAGA API_Spec §5 */
+export interface CheckoutConfig {
+  shippingFee: number;
+  freeShippingThreshold: number;
+  budgetMs: number;
+  deadlineMs: number;
+}
+
 export interface OrderConfig {
   port: number;
   database: {
@@ -35,6 +43,7 @@ export interface OrderConfig {
     ssl: boolean;
   };
   services: ServicesConfig;
+  checkout: CheckoutConfig;
 }
 
 // Thiếu biến bắt buộc thì dừng khởi động, báo rõ tên biến (coding-convention §6)
@@ -73,11 +82,25 @@ export function servicesConfig(
   };
 }
 
+// Có mặc định, không bắt buộc. Phí, ngưỡng như hằng SHIPPING_FEE, FREE_SHIPPING_THRESHOLD của
+// be/src/users/order/order.service.ts
+export function checkoutConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): CheckoutConfig {
+  return {
+    shippingFee: Number(env.SHIPPING_FEE ?? 30000),
+    freeShippingThreshold: Number(env.FREE_SHIPPING_THRESHOLD ?? 500000),
+    budgetMs: Number(env.SAGA_BUDGET_MS ?? 8000),
+    deadlineMs: Number(env.SAGA_DEADLINE_MS ?? 120000),
+  };
+}
+
 export default (): OrderConfig => {
   assertRequiredEnv();
   return {
     port: Number(process.env.PORT ?? 3004),
     database: databaseConfig(),
     services: servicesConfig(),
+    checkout: checkoutConfig(),
   };
 };

@@ -57,4 +57,16 @@ describe('IdentityClient', () => {
       path: '/internal/stats/users',
     });
   });
+
+  it('getUser, getAddress chuyển deadline xuống request', async () => {
+    request.mockResolvedValue({});
+    await client.getUser('u1', { deadline: 1 });
+    expect(request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadline: 1 }),
+    );
+    await client.getAddress('u1', 'a1', { deadline: 2 });
+    expect(request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadline: 2 }),
+    );
+  });
 });

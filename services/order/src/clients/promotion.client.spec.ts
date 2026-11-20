@@ -59,4 +59,15 @@ describe('PromotionClient', () => {
       retry: true,
     });
   });
+
+  it('redeem chuyển deadline xuống request', async () => {
+    request.mockResolvedValue({});
+    await client.redeem(
+      { order_id: 'o1', subtotal: 1, shipping_fee: 0 },
+      { deadline: 9 },
+    );
+    expect(request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadline: 9 }),
+    );
+  });
 });
