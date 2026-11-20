@@ -4,10 +4,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { HealthModule, typeOrmHealthCheck } from '@nextech/service-kit';
 import configuration from './config/configuration';
 import { dataSourceOptions } from './database/typeorm-options';
+import { InternalModule } from './internal/internal.module';
+import { AdminOrderModule } from './modules/admin-order/order.admin.module';
 import { CartModule } from './modules/cart/cart.module';
+import { OrderModule } from './modules/order/order.module';
 
-// Khung T1.6: khởi động, kết nối database, /health. T3.1: giỏ hàng. Module khác thêm ở task sau
-// (implementation/PHASE-3.md).
+// Khung T1.6: khởi động, kết nối database, /health. T3.1: giỏ hàng. T3.2: xem đơn, admin đơn,
+// /internal/purchases. Module khác thêm ở task sau (implementation/PHASE-3.md).
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
@@ -20,6 +23,9 @@ import { CartModule } from './modules/cart/cart.module';
       checks: [typeOrmHealthCheck()],
     }),
     CartModule,
+    OrderModule,
+    AdminOrderModule,
+    InternalModule,
   ],
 })
 export class AppModule {}
