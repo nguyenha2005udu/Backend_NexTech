@@ -1,4 +1,9 @@
-import { assertRequiredEnv, databaseConfig } from './configuration';
+import {
+  DB_REQUIRED,
+  assertRequiredEnv,
+  databaseConfig,
+  servicesConfig,
+} from './configuration';
 
 // coding-convention §6: thiếu biến bắt buộc thì dừng khởi động và nêu rõ tên biến
 describe('assertRequiredEnv', () => {
@@ -7,6 +12,9 @@ describe('assertRequiredEnv', () => {
     DB_USER: 'order_user',
     DB_PASS: 'order_pass',
     DB_NAME: 'order_db',
+    IDENTITY_SERVICE_URL: 'http://identity-service:3001',
+    CATALOG_SERVICE_URL: 'http://catalog-service:3002',
+    PROMOTION_SERVICE_URL: 'http://promotion-service:3003',
   };
 
   it('đủ biến → không lỗi', () => {
@@ -17,6 +25,17 @@ describe('assertRequiredEnv', () => {
     expect(() =>
       assertRequiredEnv({ ...full, DB_USER: undefined, DB_PASS: '' }),
     ).toThrow('Thiếu biến môi trường bắt buộc: DB_USER, DB_PASS');
+  });
+
+  it('thiếu URL service → lỗi nêu tên biến (architecture §8: URL bắt buộc lấy từ env)', () => {
+    expect(() =>
+      assertRequiredEnv({ ...full, CATALOG_SERVICE_URL: undefined }),
+    ).toThrow('Thiếu biến môi trường bắt buộc: CATALOG_SERVICE_URL');
+  });
+
+  it('CLI migration chỉ cần biến database', () => {
+    const dbOnly = { DB_HOST: 'h', DB_USER: 'u', DB_PASS: 'p', DB_NAME: 'n' };
+    expect(() => assertRequiredEnv(dbOnly, DB_REQUIRED)).not.toThrow();
   });
 });
 
@@ -39,5 +58,17 @@ describe('databaseConfig', () => {
     const db = databaseConfig({ ...env, DB_SSL: 'false', DB_PORT: '5433' });
     expect(db.ssl).toBe(false);
     expect(db.port).toBe(5433);
+  });
+});
+
+describe('servicesConfig', () => {
+  it('đọc 3 URL service', () => {
+    expect(
+      servicesConfig({
+        IDENTITY_SERVICE_URL: 'i',
+        CATALOG_SERVICE_URL: 'c',
+        PROMOTION_SERVICE_URL: 'p',
+      }),
+    ).toEqual({ identityUrl: 'i', catalogUrl: 'c', promotionUrl: 'p' });
   });
 });
