@@ -15,6 +15,11 @@ export interface ReserveItem {
   quantity: number;
 }
 
+/** Ngân sách của saga (epoch ms), truyền xuống ResilientHttpClient (NT.CHECKOUT_SAGA §4). */
+export interface CallOptions {
+  deadline?: number;
+}
+
 export interface ReleaseResult {
   status: 'released';
   restored: boolean;
@@ -30,7 +35,10 @@ export class CatalogClient {
   constructor(private readonly http: Pick<ResilientHttpClient, 'request'>) {}
 
   /** Sản phẩm không tồn tại thì không có trong kết quả. Chỉ đọc nên retry dù là POST. */
-  async getProducts(ids: string[]): Promise<CatalogProduct[]> {
+  async getProducts(
+    ids: string[],
+    opts: CallOptions = {},
+  ): Promise<CatalogProduct[]> {
     const unique = [...new Set(ids)];
     const batches: string[][] = [];
     for (let i = 0; i < unique.length; i += BATCH_LIMIT) {
@@ -43,6 +51,7 @@ export class CatalogClient {
           path: '/internal/products/batch',
           body: { ids: batch },
           retry: true,
+          deadline: opts.deadline,
         }),
       ),
     );
@@ -53,12 +62,14 @@ export class CatalogClient {
   reserve(
     orderId: string,
     items: ReserveItem[],
+    opts: CallOptions = {},
   ): Promise<{ order_id: string; status: 'reserved' }> {
     return this.http.request({
       method: 'POST',
       path: '/internal/stock-reservations',
       body: { order_id: orderId, items },
       retry: true,
+      deadline: opts.deadline,
     });
   }
 

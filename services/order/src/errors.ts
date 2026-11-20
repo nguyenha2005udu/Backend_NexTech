@@ -53,3 +53,36 @@ export const invalidTransition = (from: string, to: string) =>
     ORD_ERROR.INVALID_TRANSITION,
     `Không thể chuyển đơn từ "${from}" sang "${to}"`,
   );
+
+// Checkout (NT.CHECKOUT_SAGA API_Spec §1). Câu chữ giữ nguyên be/src/users/order/order.service.ts checkout.
+export const cartEmpty = () =>
+  new BusinessException(400, ORD_ERROR.CART_EMPTY, 'Giỏ hàng trống');
+
+export const invalidAddress = () =>
+  new BusinessException(
+    400,
+    ORD_ERROR.INVALID_ADDRESS,
+    'Địa chỉ giao hàng không hợp lệ',
+  );
+
+export const cartItemGone = () =>
+  new BusinessException(
+    400,
+    ORD_ERROR.CART_ITEM_GONE,
+    'Có sản phẩm đã chọn không còn trong giỏ hàng, vui lòng tải lại giỏ',
+  );
+
+export const productUnavailable = (nameOrId: string) =>
+  new BusinessException(
+    400,
+    ORD_ERROR.PRODUCT_UNAVAILABLE,
+    `Sản phẩm "${nameOrId}" hiện không khả dụng`,
+  );
+
+// Saga (NT.ORDER API_Spec §3): vi phạm ux_orders_cart_processing
+export const orderInProgress = () =>
+  new BusinessException(
+    409,
+    ORD_ERROR.ORDER_IN_PROGRESS,
+    'Đơn hàng khác đang được xử lý, vui lòng đợi',
+  );

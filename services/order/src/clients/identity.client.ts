@@ -1,4 +1,5 @@
 import type { ResilientHttpClient } from '@nextech/service-kit';
+import type { CallOptions } from './catalog.client';
 
 /** `GET /internal/users/:id` (NT.IDENTITY API_Spec §2) */
 export interface IdentityUser {
@@ -26,17 +27,23 @@ export interface IdentityAddress {
 export class IdentityClient {
   constructor(private readonly http: Pick<ResilientHttpClient, 'request'>) {}
 
-  getUser(id: string): Promise<IdentityUser> {
+  getUser(id: string, opts: CallOptions = {}): Promise<IdentityUser> {
     return this.http.request({
       method: 'GET',
       path: `/internal/users/${encodeURIComponent(id)}`,
+      deadline: opts.deadline,
     });
   }
 
-  getAddress(userId: string, addressId: string): Promise<IdentityAddress> {
+  getAddress(
+    userId: string,
+    addressId: string,
+    opts: CallOptions = {},
+  ): Promise<IdentityAddress> {
     return this.http.request({
       method: 'GET',
       path: `/internal/users/${encodeURIComponent(userId)}/addresses/${encodeURIComponent(addressId)}`,
+      deadline: opts.deadline,
     });
   }
 

@@ -112,4 +112,22 @@ describe('CatalogClient', () => {
       path: '/internal/stats/products',
     });
   });
+
+  // Saga truyền ngân sách (NT.CHECKOUT_SAGA Component_Class_Design §4) xuống ResilientHttpClient
+  describe('deadline', () => {
+    it('getProducts, reserve chuyển deadline xuống request', async () => {
+      request.mockResolvedValue({ items: [] });
+      await client.getProducts(['p1'], { deadline: 123 });
+      expect(request).toHaveBeenLastCalledWith(
+        expect.objectContaining({ deadline: 123 }),
+      );
+      request.mockResolvedValue({ order_id: 'o1', status: 'reserved' });
+      await client.reserve('o1', [{ product_id: 'p1', quantity: 1 }], {
+        deadline: 456,
+      });
+      expect(request).toHaveBeenLastCalledWith(
+        expect.objectContaining({ deadline: 456 }),
+      );
+    });
+  });
 });

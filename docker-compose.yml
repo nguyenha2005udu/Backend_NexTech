@@ -219,6 +219,11 @@ services:
       IDENTITY_SERVICE_URL: http://identity-service:3001
       CATALOG_SERVICE_URL: http://catalog-service:3002
       PROMOTION_SERVICE_URL: http://promotion-service:3003
+      # Giá, saga (T3.3 — NT.ORDER API_Spec §4, NT.CHECKOUT_SAGA API_Spec §5)
+      SHIPPING_FEE: ${SHIPPING_FEE:-30000}
+      FREE_SHIPPING_THRESHOLD: ${FREE_SHIPPING_THRESHOLD:-500000}
+      SAGA_BUDGET_MS: ${SAGA_BUDGET_MS:-8000}
+      SAGA_DEADLINE_MS: ${SAGA_DEADLINE_MS:-120000}
     healthcheck: *node-health
 
   notification-service:

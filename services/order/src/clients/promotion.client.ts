@@ -1,4 +1,5 @@
 import type { ResilientHttpClient } from '@nextech/service-kit';
+import type { CallOptions } from './catalog.client';
 
 /** Body `POST /internal/redemptions` (NT.PROMOTION API_Spec). Có ít nhất một trong hai mã. */
 export interface RedeemRequest {
@@ -23,12 +24,13 @@ export interface RedeemResult {
 export class PromotionClient {
   constructor(private readonly http: Pick<ResilientHttpClient, 'request'>) {}
 
-  redeem(dto: RedeemRequest): Promise<RedeemResult> {
+  redeem(dto: RedeemRequest, opts: CallOptions = {}): Promise<RedeemResult> {
     return this.http.request({
       method: 'POST',
       path: '/internal/redemptions',
       body: dto,
       retry: true,
+      deadline: opts.deadline,
     });
   }
 
