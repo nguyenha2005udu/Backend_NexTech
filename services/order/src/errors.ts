@@ -37,3 +37,19 @@ export const outOfStock = (name: string, stock: number) =>
     ORD_ERROR.OUT_OF_STOCK,
     `Sản phẩm "${name}" chỉ còn ${stock} trong kho`,
   );
+
+// Câu chữ giữ nguyên be/src/users/order, be/src/admin/order
+export const orderNotFound = () =>
+  new BusinessException(
+    404,
+    ORD_ERROR.ORDER_NOT_FOUND,
+    'Không tìm thấy đơn hàng',
+  );
+
+// BR-06
+export const invalidTransition = (from: string, to: string) =>
+  new BusinessException(
+    400,
+    ORD_ERROR.INVALID_TRANSITION,
+    `Không thể chuyển đơn từ "${from}" sang "${to}"`,
+  );

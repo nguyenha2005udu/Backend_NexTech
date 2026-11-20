@@ -1,6 +1,8 @@
 // Chép từ services/catalog/src/test-helpers.ts (T2.4), đổi env sang order_*. Trùng 3 service: ứng viên đưa vào service-kit (tech-debt T2.4).
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { DataSource, DataSourceOptions } from 'typeorm';
+import { PostgresQueryRunner } from 'typeorm/driver/postgres/PostgresQueryRunner';
 import { dataSourceOptions } from './database/typeorm-options';
 
 // Dựng Postgres thật cho *.int-spec.ts (tdd-guide §5: test đồng thời không dùng mock).
@@ -62,4 +64,72 @@ export async function createTestDb(): Promise<TestDb> {
       );
     },
   };
+}
+
+// Đếm câu SQL thật gửi Postgres trong một đoạn code (non-functional §1: đo thật), bỏ lệnh điều khiển
+// transaction. Dùng trong jest: q = countQueries(); …; expect(q.count).toBe(n); q.restore().
+export function countQueries() {
+  const spy = jest.spyOn(PostgresQueryRunner.prototype, 'query');
+  return {
+    get count() {
+      return spy.mock.calls.filter(
+        ([sql]) =>
+          !/^(START TRANSACTION|COMMIT|ROLLBACK|SELECT version\(\))/i.test(
+            String(sql),
+          ),
+      ).length;
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
+
+export interface SeedLine {
+  product_id?: string;
+  product_name?: string;
+  product_image?: string | null;
+  quantity?: number;
+  unit_price?: number;
+}
+
+// Chèn một đơn kèm dòng đơn (chưa có saga tới T3.3). Trả id đơn.
+export async function seedOrder(
+  ds: DataSource,
+  o: {
+    user_id: string;
+    status: string;
+    customer_name?: string | null;
+    created_at?: Date;
+    payment_expires_at?: Date | null;
+    lines?: SeedLine[];
+  },
+): Promise<string> {
+  const [{ id }] = await ds.query<Array<{ id: string }>>(
+    `INSERT INTO orders (user_id, customer_name, customer_email, customer_phone, shipping_full_address,
+       subtotal, shipping_fee, total, status, created_at, payment_expires_at)
+     VALUES ($1, $2, 'a@b.c', '0900000000', '1 Lê Lợi', 200000, 30000, 230000, $3,
+       COALESCE($4, now()), $5)
+     RETURNING id`,
+    [
+      o.user_id,
+      o.customer_name ?? 'Nguyễn A',
+      o.status,
+      o.created_at ?? null,
+      o.payment_expires_at ?? null,
+    ],
+  );
+  for (const l of o.lines ?? []) {
+    await ds.query(
+      `INSERT INTO order_items (order_id, product_id, product_name, product_image, quantity, unit_price)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        id,
+        l.product_id ?? randomUUID(),
+        l.product_name ?? 'Tai nghe X',
+        l.product_image ?? null,
+        l.quantity ?? 1,
+        l.unit_price ?? 100000,
+      ],
+    );
+  }
+  return id;
 }

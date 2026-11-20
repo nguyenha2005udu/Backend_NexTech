@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { PostgresQueryRunner } from 'typeorm/driver/postgres/PostgresQueryRunner';
 import type {
   CatalogClient,
   CatalogProduct,
 } from '../../clients/catalog.client';
 import { Cart } from '../../database/entities/cart.entity';
 import { CartItem } from '../../database/entities/cart-item.entity';
-import { createTestDb, TestDb } from '../../test-helpers';
+import { countQueries, createTestDb, TestDb } from '../../test-helpers';
 import { CartService } from './cart.service';
 
 // POSTGRES THẬT — không mock DB (tdd-guide §5). Catalog là giả (không phải DB của order).
@@ -24,22 +23,6 @@ const PRODUCT: CatalogProduct = {
   is_active: true,
   image: null,
 };
-
-// Đếm câu SQL thật gửi Postgres, bỏ lệnh điều khiển transaction
-function countQueries() {
-  const spy = jest.spyOn(PostgresQueryRunner.prototype, 'query');
-  return {
-    get count() {
-      return spy.mock.calls.filter(
-        ([sql]) =>
-          !/^(START TRANSACTION|COMMIT|ROLLBACK|SELECT version\(\))/i.test(
-            String(sql),
-          ),
-      ).length;
-    },
-    restore: () => spy.mockRestore(),
-  };
-}
 
 describe('CartService (Postgres thật)', () => {
   let db: TestDb;
