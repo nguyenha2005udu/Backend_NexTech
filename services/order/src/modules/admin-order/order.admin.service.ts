@@ -2,7 +2,9 @@
 // - Bỏ JOIN users: tên, email, SĐT lấy từ snapshot orders.customer_* (identity_db ở service khác).
 // - Dòng đơn đọc snapshot product_name, unit_price; giữ quan hệ payment (cùng service).
 // - updateStatus viết lại theo API_Spec §1 route 11 + business-spec §5 (sổ A1: không đặt `paid` tay,
-//   pending → shipped chỉ đơn COD). Nhánh cần code nền tạm 501 — xem updateStatus.
+//   pending → shipped chỉ đơn COD). Giao COD tạm 501 tới T3.6 — xem updateStatus.
+// - Huỷ: OrderCancelService của NT.CHECKOUT_SAGA (T3.5) thay releaseOrderResources; chỉ đọc payments khi
+//   giao hàng (NT.ORDER v1.6).
 import { Injectable, NotImplementedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -10,6 +12,7 @@ import { Order, OrderStatus } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { Payment } from '../../database/entities/payment.entity';
 import { invalidTransition, orderNotFound } from '../../errors';
+import { OrderCancelService } from '../checkout/order-cancel.service';
 import { paymentExpiresAt } from '../order/order.service';
 import { QueryAdminOrderDto, UpdateOrderStatusDto } from './order.admin.dto';
 
@@ -30,6 +33,7 @@ export class AdminOrderService {
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
     private readonly dataSource: DataSource,
+    private readonly orderCancel: OrderCancelService,
   ) {}
 
   // GET /api/admin/orders — 2 truy vấn: count + data (product_count là subquery, không nhân dòng)
@@ -131,7 +135,7 @@ export class AdminOrderService {
   // PUT /api/admin/orders/:id/status (API_Spec §1 route 11).
   // Khoá dòng Postgres như be/; khoá Redis withOrderLock (BR-20) bọc thêm ở T3.9.
   async updateStatus(id: string, dto: UpdateOrderStatusDto) {
-    return this.dataSource.transaction(async (manager) => {
+    const r = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
 
       // Khoá dòng đơn để không đua với người mua tự huỷ / webhook thanh toán.
@@ -142,30 +146,30 @@ export class AdminOrderService {
       });
       if (!order) throw orderNotFound();
 
+      if (!ALLOWED_TRANSITIONS[order.status].includes(dto.status)) {
+        throw invalidTransition(order.status, dto.status);
+      }
+
+      // Huỷ chỉ có một chỗ (NT.ORDER Processing_Flow §4): saga_tasks, (T3.6) voidPendingByOrder,
+      // (T4.1) outbox cancelled_by admin. paid → cancelled: giao dịch success giữ nguyên, hoàn tiền tay (be/).
+      if (dto.status === 'cancelled') {
+        return this.orderCancel.cancel(manager, order, 'admin');
+      }
+
+      // Chỉ đọc giao dịch khi giao hàng (NT.ORDER v1.6): be/ đọc mọi lần, huỷ không dùng tới
       const payment = await manager
         .getRepository(Payment)
         .findOne({ where: { order_id: id } });
 
-      if (!ALLOWED_TRANSITIONS[order.status].includes(dto.status)) {
-        throw invalidTransition(order.status, dto.status);
-      }
       // pending → shipped chỉ đơn COD còn chờ thu tiền; đơn PayOS phải paid trước
       const isCodDelivery = order.status === 'pending';
       if (
         isCodDelivery &&
-        dto.status === 'shipped' &&
         !(payment?.method === 'cod' && payment.status === 'pending')
       ) {
         throw invalidTransition(order.status, dto.status);
       }
-
-      // Tạm thời (quyết định 20-11-2026): không đổi trạng thái khi chưa có code nhả kho / ghi tiền.
-      if (dto.status === 'cancelled') {
-        // T3.5: OrderCancelService.cancel(order, 'admin') — saga_tasks, outbox order.cancelled
-        throw new NotImplementedException(
-          'Huỷ đơn từ màn quản trị chưa hỗ trợ',
-        );
-      }
+      // Tạm thời (quyết định 20-11-2026): không đổi trạng thái khi chưa ghi tiền được.
       if (isCodDelivery) {
         // T3.6: PaymentCoreService.confirmCodByOrder(manager, id) trong cùng transaction
         throw new NotImplementedException('Giao đơn COD chưa hỗ trợ');
@@ -175,10 +179,17 @@ export class AdminOrderService {
       const saved = await orderRepo.save(order);
 
       return {
-        id: saved.id,
-        status: saved.status,
-        updated_at: saved.updated_at,
+        result: {
+          id: saved.id,
+          status: saved.status,
+          updated_at: saved.updated_at,
+        },
+        tasks: null,
       };
     });
+
+    // Sau commit, giống người mua huỷ: nhả trong ngân sách, lỗi thì cron. T3.10: unschedule hạn giữ hàng.
+    if (r.tasks) await this.orderCancel.releaseAfterCommit(id, r.tasks);
+    return r.result;
   }
 }

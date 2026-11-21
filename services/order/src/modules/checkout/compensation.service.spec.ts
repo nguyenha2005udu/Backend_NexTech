@@ -7,7 +7,7 @@ import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
 import { CompensationService } from './compensation.service';
 
-// NT.CHECKOUT_SAGA Component_Class_Design §6 (v1.6): startForFailedSaga, run(orderId, deadline?), finish.
+// NT.CHECKOUT_SAGA Component_Class_Design §6 (v1.7): startForFailedSaga, run(orderId, opts), finish.
 // §8 test 14 (thứ tự khởi chạy, promotion lỗi vẫn nhả kho), 19, 20, 23/24 (key). Đua thật: int-spec.
 
 describe('CompensationService', () => {
@@ -54,6 +54,8 @@ describe('CompensationService', () => {
     'Hết hàng',
   );
   const FAR = Date.now() + 60_000;
+  // attempts = attempts + 1 tính trong SQL (v1.7): TypeORM nhận hàm trả biểu thức
+  const INCREMENT = expect.any(Function) as unknown;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -182,7 +184,10 @@ describe('CompensationService', () => {
       });
       expect(tasks.update).toHaveBeenCalledWith(
         { id: 't1' },
-        { attempts: 3, last_error: 'promotion ECONNREFUSED (not_executed)' },
+        {
+          attempts: INCREMENT,
+          last_error: 'promotion ECONNREFUSED (not_executed)',
+        },
       );
       expect(tasks.update).toHaveBeenCalledWith(
         { id: In(['t2']) },
@@ -199,7 +204,7 @@ describe('CompensationService', () => {
       await svc.run('o1');
       expect(tasks.update).toHaveBeenCalledWith(
         { id: 't2' },
-        { attempts: 1, last_error: 'catalog 400 NT-GEN-0001' },
+        { attempts: INCREMENT, last_error: 'catalog 400 NT-GEN-0001' },
       );
     });
 
@@ -221,7 +226,7 @@ describe('CompensationService', () => {
         task('t2', 'release_stock', 2),
       ]);
       try {
-        await svc.run('o1', 10_000);
+        await svc.run('o1', { deadline: 10_000 });
         expect(catalog.release).not.toHaveBeenCalled();
         expect(tasks.update).toHaveBeenCalledWith(
           { id: In(['t1']) },
@@ -231,6 +236,47 @@ describe('CompensationService', () => {
       } finally {
         jest.restoreAllMocks();
       }
+    });
+
+    it('attempts tăng trong SQL, không đọc rồi ghi (request và cron cùng ghi không mất lần đếm)', async () => {
+      catalog.release.mockRejectedValue(
+        new UpstreamError('catalog', 'ETIMEDOUT', 'unknown'),
+      );
+      tasks.find.mockResolvedValue([task('t2', 'release_stock', 2)]);
+      await svc.run('o1');
+      const [, set] = tasks.update.mock.calls[0] as [
+        unknown,
+        { attempts: () => string },
+      ];
+      expect(set.attempts()).toBe('"attempts" + 1');
+    });
+
+    it('tasks truyền vào (huỷ đơn vừa insert) → không SELECT lại', async () => {
+      await svc.run('o1', { tasks: [task('t2', 'release_stock', 2)] });
+      expect(tasks.find).not.toHaveBeenCalled();
+      expect(catalog.release).toHaveBeenCalledWith('o1', {
+        deadline: undefined,
+      });
+      expect(tasks.update).toHaveBeenCalledWith(
+        { id: In(['t2']) },
+        expect.objectContaining({ status: 'done' }),
+      );
+    });
+
+    it('finish: false (huỷ đơn) → xong hết cũng không chạm orders', async () => {
+      await svc.run('o1', {
+        tasks: [task('t2', 'release_stock', 2)],
+        finish: false,
+      });
+      expect(orders.update).not.toHaveBeenCalled();
+    });
+
+    it('deadline truyền xuống lệnh nhả', async () => {
+      await svc.run('o1', {
+        tasks: [task('t1', 'release_promotion', 1)],
+        deadline: FAR,
+      });
+      expect(promotion.release).toHaveBeenCalledWith('o1', { deadline: FAR });
     });
 
     it('finish muộn khi đơn đã pending/cancelled: UPDATE có điều kiện không khớp, không lỗi (test 20)', async () => {

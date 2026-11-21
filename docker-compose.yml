@@ -224,6 +224,8 @@ services:
       FREE_SHIPPING_THRESHOLD: ${FREE_SHIPPING_THRESHOLD:-500000}
       SAGA_BUDGET_MS: ${SAGA_BUDGET_MS:-8000}
       SAGA_DEADLINE_MS: ${SAGA_DEADLINE_MS:-120000}
+      # Cron đối soát (T3.5 — NT.CHECKOUT_SAGA Component_Class_Design §7); RESILIENCE_ENABLED=false tắt cron
+      SAGA_RECONCILE_INTERVAL_MS: ${SAGA_RECONCILE_INTERVAL_MS:-10000}
     healthcheck: *node-health
 
   notification-service:

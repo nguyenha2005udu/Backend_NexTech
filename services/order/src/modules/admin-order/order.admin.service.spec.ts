@@ -3,10 +3,12 @@ import { HttpException } from '@nestjs/common';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { Order, type OrderStatus } from '../../database/entities/order.entity';
 import { Payment } from '../../database/entities/payment.entity';
+import type { OrderCancelService } from '../checkout/order-cancel.service';
 import { AdminOrderService } from './order.admin.service';
 
 // PUT /api/admin/orders/:id/status — NT.ORDER API_Spec §1 route 11, business-spec §5 (BR-06),
-// Component_Class_Design §7 "Chuyển trạng thái sai → 400 NT-ORD-1007".
+// Component_Class_Design §7 "Chuyển trạng thái sai → 400 NT-ORD-1007". T3.5: huỷ qua OrderCancelService
+// (NT.CHECKOUT_SAGA §7.1 v1.7), chỉ đọc payments khi shipped (NT.ORDER v1.6).
 // findAll, findOne: order.admin.service.int-spec.ts (Postgres thật, QueryBuilder).
 
 const UPDATED = new Date('2026-11-20T02:00:00Z');
@@ -24,9 +26,12 @@ describe('AdminOrderService.updateStatus', () => {
       cb(manager as unknown as EntityManager),
     ),
   };
+  const TASKS = [{ id: 't1', order_id: 'o1', type: 'release_stock', seq: 2 }];
+  const orderCancel = { cancel: jest.fn(), releaseAfterCommit: jest.fn() };
   const service = new AdminOrderService(
     {} as Repository<Order>,
     dataSource as unknown as DataSource,
+    orderCancel as unknown as OrderCancelService,
   );
 
   const givenOrder = (status: OrderStatus) =>
@@ -42,6 +47,11 @@ describe('AdminOrderService.updateStatus', () => {
       Promise.resolve({ ...o, updated_at: UPDATED }),
     );
     givenPayment(null);
+    orderCancel.cancel.mockResolvedValue({
+      result: { id: 'o1', status: 'cancelled', updated_at: UPDATED },
+      tasks: TASKS,
+    });
+    orderCancel.releaseAfterCommit.mockResolvedValue(undefined);
   });
 
   it('khoá dòng đơn trong transaction (FOR UPDATE, như be/)', async () => {
@@ -113,23 +123,46 @@ describe('AdminOrderService.updateStatus', () => {
     );
   });
 
-  // Giữ chỗ tới khi có code nền (quyết định 20-11-2026, current-task T3.2 [cần xác nhận] #1):
-  // không đổi trạng thái khi chưa nhả kho / ghi tiền được.
-  it.each<
-    [OrderStatus, 'shipped' | 'cancelled', Partial<Payment> | null, string]
-  >([
-    ['pending', 'shipped', { method: 'cod', status: 'pending' }, 'T3.6'],
-    ['pending', 'cancelled', null, 'T3.5'],
-    ['paid', 'cancelled', { method: 'payos', status: 'success' }, 'T3.5'],
-  ])(
-    '%s → %s hợp lệ nhưng chưa có code nền → 501, không ghi (%s thay)',
-    async (from, to, payment) => {
+  // Giữ chỗ tới khi có code nền (quyết định 20-11-2026): giao COD cần confirmCodByOrder (T3.6)
+  it('pending → shipped (COD) hợp lệ nhưng chưa có code nền → 501, không ghi (T3.6 thay)', async () => {
+    givenOrder('pending');
+    givenPayment({ method: 'cod', status: 'pending' });
+    const err = await errorOf(
+      service.updateStatus('o1', { status: 'shipped' }),
+    );
+    expect(err).toBeInstanceOf(HttpException);
+    expect((err as HttpException).getStatus()).toBe(501);
+    expect(orderRepo.save).not.toHaveBeenCalled();
+  });
+
+  it.each<OrderStatus>(['pending', 'paid'])(
+    '%s → cancelled: OrderCancelService.cancel(admin) trong transaction, nhả sau commit, không đọc payments (test 32)',
+    async (from) => {
       givenOrder(from);
-      givenPayment(payment);
-      const err = await errorOf(service.updateStatus('o1', { status: to }));
-      expect(err).toBeInstanceOf(HttpException);
-      expect((err as HttpException).getStatus()).toBe(501);
+      await expect(
+        service.updateStatus('o1', { status: 'cancelled' }),
+      ).resolves.toEqual({
+        id: 'o1',
+        status: 'cancelled',
+        updated_at: UPDATED,
+      });
+      expect(orderCancel.cancel).toHaveBeenCalledWith(
+        manager,
+        { id: 'o1', status: from },
+        'admin',
+      );
+      expect(orderCancel.releaseAfterCommit).toHaveBeenCalledWith('o1', TASKS);
+      expect(paymentRepo.findOne).not.toHaveBeenCalled();
       expect(orderRepo.save).not.toHaveBeenCalled();
     },
   );
+
+  it('huỷ: transaction lỗi (chưa commit) → không nhả', async () => {
+    givenOrder('pending');
+    orderCancel.cancel.mockRejectedValue(new Error('insert lỗi'));
+    await expect(
+      service.updateStatus('o1', { status: 'cancelled' }),
+    ).rejects.toThrow('insert lỗi');
+    expect(orderCancel.releaseAfterCommit).not.toHaveBeenCalled();
+  });
 });

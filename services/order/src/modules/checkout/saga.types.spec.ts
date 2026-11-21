@@ -4,7 +4,12 @@ import {
   UpstreamError,
 } from '@nextech/service-kit';
 import type { Order } from '../../database/entities/order.entity';
-import { failureFieldsOf, isBudgetExhausted, toOutcome } from './saga.types';
+import {
+  failureFieldsOf,
+  isBudgetExhausted,
+  timeoutError,
+  toOutcome,
+} from './saga.types';
 
 // NT.CHECKOUT_SAGA Component_Class_Design §3 (SagaOutcome), §4 (ngân sách), API_Spec §5
 describe('isBudgetExhausted', () => {
@@ -122,5 +127,23 @@ describe('failureFieldsOf', () => {
       new UpstreamBusinessError('x', 400, 'C'.repeat(40), 'm'),
     ).failure_code;
     expect(code).toHaveLength(30);
+  });
+});
+
+// Đơn quá SAGA_DEADLINE_MS (Component_Class_Design §7, v1.7)
+describe('timeoutError', () => {
+  it('504 NT-GEN-0504, câu cho người dùng', () => {
+    const e = timeoutError();
+    expect(e).toBeInstanceOf(BusinessException);
+    expect(e.getStatus()).toBe(504);
+    expect(e.code).toBe('NT-GEN-0504');
+  });
+
+  it('failureFieldsOf → failure_status ≥ 500 (startForFailedSaga nhả Idempotency-Key)', () => {
+    expect(failureFieldsOf(timeoutError())).toEqual({
+      failure_code: 'NT-GEN-0504',
+      failure_message: 'Đặt hàng quá thời gian xử lý, vui lòng thử lại',
+      failure_status: 504,
+    });
   });
 });

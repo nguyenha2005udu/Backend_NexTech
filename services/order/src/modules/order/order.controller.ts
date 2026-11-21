@@ -1,5 +1,5 @@
 // Chép GET từ be/src/users/order/order.controller.ts. Đổi guard: JwtAccessGuard → GatewayUserGuard.
-// POST /orders (checkout) ở T3.3, PUT /orders/:id/cancel ở T3.5 — cùng đường dẫn, module checkout.
+// POST /orders (checkout, T3.3), PUT /orders/:id/cancel (T3.5): cùng đường dẫn, ở modules/checkout.
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   CurrentUser,
