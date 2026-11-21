@@ -11,12 +11,14 @@ import {
   seedOrder,
   TestDb,
 } from '../../test-helpers';
+import { PaymentCoreService } from '../payment/payment-core.service';
+import { PaymentLedgerService } from '../payment/payment-ledger.service';
 import { CompensationService } from './compensation.service';
 import { OrderCancelService } from './order-cancel.service';
 
 // POSTGRES THẬT, client giả. Chạy: docker compose up -d postgres && npm run test:int -w services/order -- order-cancel
 // NT.CHECKOUT_SAGA Component_Class_Design §7.1, §8 test 17, 18, 31; số truy vấn Processing_Flow §5 (v1.7):
-// ở T3.5 (chưa voidPendingByOrder, outbox) là 4; đường lỗi: mỗi task lỗi một câu ghi lỗi thay/thêm câu done.
+// T3.6 (có voidPendingByOrder, chưa outbox) là 5; đường lỗi: mỗi task lỗi một câu ghi lỗi thay/thêm câu done.
 
 jest.setTimeout(60_000);
 
@@ -26,9 +28,14 @@ describe('OrderCancelService (Postgres thật)', () => {
   const catalog = { release: jest.fn() };
   const promotion = { release: jest.fn() };
   const make = (budgetMs = 8000) =>
-    new OrderCancelService(db.ds, compensation, {
-      getOrThrow: () => ({ budgetMs }),
-    } as unknown as ConfigService);
+    new OrderCancelService(
+      db.ds,
+      compensation,
+      new PaymentCoreService(db.ds, new PaymentLedgerService(db.ds)),
+      {
+        getOrThrow: () => ({ budgetMs }),
+      } as unknown as ConfigService,
+    );
   let service: OrderCancelService;
 
   beforeAll(async () => {
@@ -75,7 +82,7 @@ describe('OrderCancelService (Postgres thật)', () => {
       order: { seq: 'ASC' },
     });
 
-  it('huỷ đơn pending → { id, cancelled, updated_at } khớp DB, nhả kho ngay, task done; 4 truy vấn', async () => {
+  it('huỷ đơn pending → { id, cancelled, updated_at } khớp DB, nhả kho ngay, task done, giao dịch pending → failed; 5 truy vấn', async () => {
     const u = randomUUID();
     const id = await pendingOrder(u);
 
@@ -96,7 +103,7 @@ describe('OrderCancelService (Postgres thật)', () => {
     expect(await tasksOf(id)).toEqual([
       expect.objectContaining({ type: 'release_stock', status: 'done' }),
     ]);
-    expect(n).toBe(4);
+    expect(n).toBe(5);
   });
 
   it('có mã → nhả mã rồi nhả kho, cả hai done', async () => {
@@ -118,7 +125,7 @@ describe('OrderCancelService (Postgres thật)', () => {
     expect((await tasksOf(id)).map((t) => t.status)).toEqual(['done', 'done']);
   });
 
-  it('test 17: catalog lỗi → vẫn 200 cancelled, task còn pending attempts 1; cron chạy lại → done, đơn vẫn cancelled; 4 truy vấn (câu ghi lỗi thay câu done)', async () => {
+  it('test 17: catalog lỗi → vẫn 200 cancelled, task còn pending attempts 1; cron chạy lại → done, đơn vẫn cancelled; 5 truy vấn (câu ghi lỗi thay câu done)', async () => {
     const u = randomUUID();
     const id = await pendingOrder(u);
     catalog.release.mockRejectedValueOnce(refused('catalog'));
@@ -134,7 +141,7 @@ describe('OrderCancelService (Postgres thật)', () => {
       attempts: 1,
       last_error: 'catalog ECONNREFUSED (not_executed)',
     });
-    expect(n).toBe(4);
+    expect(n).toBe(5);
 
     await compensation.run(id); // như ReconcileJob bước 2
 
@@ -142,7 +149,7 @@ describe('OrderCancelService (Postgres thật)', () => {
     expect((await orderRow(id)).status).toBe('cancelled');
   });
 
-  it('đường lỗi xấu nhất: có mã, nhả kho lỗi, nhả mã xong → 5 truy vấn ở T3.5 (khi đủ T3.6, T4.1: 7)', async () => {
+  it('đường lỗi xấu nhất: có mã, nhả kho lỗi, nhả mã xong → 6 truy vấn ở T3.6 (khi có outbox T4.1: 7)', async () => {
     const u = randomUUID();
     const id = await pendingOrder(u, 'SALE10');
     catalog.release.mockRejectedValueOnce(refused('catalog'));
@@ -156,7 +163,7 @@ describe('OrderCancelService (Postgres thật)', () => {
       'done',
       'pending',
     ]);
-    expect(n).toBe(5);
+    expect(n).toBe(6);
   });
 
   it('test 18: huỷ hai lần nối tiếp → lần hai 400 NT-ORD-1008, nhả một lần', async () => {

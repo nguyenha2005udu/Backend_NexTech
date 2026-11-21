@@ -81,6 +81,8 @@ services:
 
   payos-mock:
     build: ./infra/payos-mock
+    # Mock có thể bị dừng tay khi kiểm chứng "PayOS chết"; sập ngoài ý muốn thì tự chạy lại (NT.PAYMENT v2.7 §5)
+    restart: unless-stopped
     environment:
       PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-dev-checksum}
       WEBHOOK_URL: http://api-gateway:8080/api/webhooks/payos
@@ -226,6 +228,16 @@ services:
       SAGA_DEADLINE_MS: ${SAGA_DEADLINE_MS:-120000}
       # Cron đối soát (T3.5 — NT.CHECKOUT_SAGA Component_Class_Design §7); RESILIENCE_ENABLED=false tắt cron
       SAGA_RECONCILE_INTERVAL_MS: ${SAGA_RECONCILE_INTERVAL_MS:-10000}
+      # PayOS (T3.6 — NT.PAYMENT API_Spec §5). Mặc định mock: thiếu PAYOS_BASE_URL thì SDK gọi PayOS THẬT, nên đặt
+      # tường minh kể cả khi .env có khoá thật (v2.7). Khoá ký trùng với payos-mock (cùng biến). Không depends_on
+      # payos-mock: PayOS chết thì POST /api/payments trả 503 NT-PAY-1006, order vẫn chạy.
+      PAYOS_BASE_URL: ${PAYOS_BASE_URL:-http://payos-mock:4010}
+      PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-dev}
+      PAYOS_API_KEY: ${PAYOS_API_KEY:-dev}
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-dev-checksum}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:3000/payment/success}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:3000/payment/cancel}
+      PAYOS_TIMEOUT_MS: ${PAYOS_TIMEOUT_MS:-5000}
     healthcheck: *node-health
 
   notification-service:

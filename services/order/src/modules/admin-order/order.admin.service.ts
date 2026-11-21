@@ -2,10 +2,10 @@
 // - Bỏ JOIN users: tên, email, SĐT lấy từ snapshot orders.customer_* (identity_db ở service khác).
 // - Dòng đơn đọc snapshot product_name, unit_price; giữ quan hệ payment (cùng service).
 // - updateStatus viết lại theo API_Spec §1 route 11 + business-spec §5 (sổ A1: không đặt `paid` tay,
-//   pending → shipped chỉ đơn COD). Giao COD tạm 501 tới T3.6 — xem updateStatus.
+//   pending → shipped chỉ đơn COD). Giao COD xác nhận giao dịch cùng transaction (T3.6, confirmCodByOrder).
 // - Huỷ: OrderCancelService của NT.CHECKOUT_SAGA (T3.5) thay releaseOrderResources; chỉ đọc payments khi
 //   giao hàng (NT.ORDER v1.6).
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
@@ -13,6 +13,7 @@ import { OrderItem } from '../../database/entities/order-item.entity';
 import { Payment } from '../../database/entities/payment.entity';
 import { invalidTransition, orderNotFound } from '../../errors';
 import { OrderCancelService } from '../checkout/order-cancel.service';
+import { PaymentCoreService } from '../payment/payment-core.service';
 import { paymentExpiresAt } from '../order/order.service';
 import { QueryAdminOrderDto, UpdateOrderStatusDto } from './order.admin.dto';
 
@@ -34,6 +35,7 @@ export class AdminOrderService {
     private readonly orderRepo: Repository<Order>,
     private readonly dataSource: DataSource,
     private readonly orderCancel: OrderCancelService,
+    private readonly paymentCore: PaymentCoreService,
   ) {}
 
   // GET /api/admin/orders — 2 truy vấn: count + data (product_count là subquery, không nhân dòng)
@@ -150,7 +152,7 @@ export class AdminOrderService {
         throw invalidTransition(order.status, dto.status);
       }
 
-      // Huỷ chỉ có một chỗ (NT.ORDER Processing_Flow §4): saga_tasks, (T3.6) voidPendingByOrder,
+      // Huỷ chỉ có một chỗ (NT.ORDER Processing_Flow §4): saga_tasks, voidPendingByOrder,
       // (T4.1) outbox cancelled_by admin. paid → cancelled: giao dịch success giữ nguyên, hoàn tiền tay (be/).
       if (dto.status === 'cancelled') {
         return this.orderCancel.cancel(manager, order, 'admin');
@@ -169,10 +171,10 @@ export class AdminOrderService {
       ) {
         throw invalidTransition(order.status, dto.status);
       }
-      // Tạm thời (quyết định 20-11-2026): không đổi trạng thái khi chưa ghi tiền được.
+      // Giao COD = thu tiền: giao dịch success cùng transaction với đơn shipped (be/ confirmCodForOrder). Không phát
+      // order.paid vì đơn sang shipped (NT.MESSAGING API_Spec §3)
       if (isCodDelivery) {
-        // T3.6: PaymentCoreService.confirmCodByOrder(manager, id) trong cùng transaction
-        throw new NotImplementedException('Giao đơn COD chưa hỗ trợ');
+        await this.paymentCore.confirmCodByOrder(manager, id);
       }
 
       order.status = dto.status;

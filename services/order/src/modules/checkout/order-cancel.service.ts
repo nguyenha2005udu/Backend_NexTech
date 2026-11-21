@@ -5,8 +5,8 @@
 // dòng 51–80) cộng kho, trừ used_count trong cùng transaction → tạo saga_tasks trong transaction, nhả kho/mã
 // qua catalog, promotion sau commit (không gọi HTTP khi giữ transaction). Lệnh lỗi thì ReconcileJob thử lại.
 // Dùng chung cho người mua và admin (NT.ORDER API_Spec route 11), hệ thống khi quá hạn (T3.10).
-// Chưa có: withOrderLock (T3.9), HoldScheduleService.unschedule (T3.10), voidPendingByOrder (T3.6),
-// outbox order.cancelled (T4.1).
+// T3.6: giao dịch pending → failed (voidPendingByOrder) trong cùng transaction, như releaseOrderResources của be/.
+// Chưa có: withOrderLock (T3.9), HoldScheduleService.unschedule (T3.10), outbox order.cancelled (T4.1).
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
@@ -14,6 +14,7 @@ import type { CheckoutConfig } from '../../config/configuration';
 import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
 import { cannotCancel, orderNotFound } from '../../errors';
+import { PaymentCoreService } from '../payment/payment-core.service';
 import { CompensationService, compensationTasks } from './compensation.service';
 
 export type CancelledBy = 'user' | 'admin' | 'system';
@@ -34,6 +35,7 @@ export class OrderCancelService {
   constructor(
     private readonly ds: DataSource,
     private readonly compensation: CompensationService,
+    private readonly paymentCore: PaymentCoreService,
     config: ConfigService,
   ) {
     this.budgetMs = config.getOrThrow<CheckoutConfig>('checkout').budgetMs;
@@ -76,7 +78,8 @@ export class OrderCancelService {
       .execute();
     const rows = updated.raw as Array<{ updated_at: Date }>;
 
-    // T3.6: paymentCore.voidPendingByOrder(m, order.id) — giao dịch pending → failed (be/ dòng 77–79)
+    // Giao dịch pending → failed; success giữ nguyên để hoàn tiền tay (be/ dòng 77–79, BR-10)
+    await this.paymentCore.voidPendingByOrder(m, order.id);
     const list = compensationTasks(order);
     const inserted = await m.insert(SagaTask, list);
     // T4.1: outbox order.cancelled { order_id, user_id, cancelled_by: by }. Tới lúc đó ghi log để lần ra
