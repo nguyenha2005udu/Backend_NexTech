@@ -18,7 +18,9 @@ x-common-env: &common-env
   CB_VOLUME_THRESHOLD: ${CB_VOLUME_THRESHOLD:-5}
   CB_ERROR_PERCENT: ${CB_ERROR_PERCENT:-50}
   CB_RESET_MS: ${CB_RESET_MS:-10000}
-  # Ghi đè được từ .env (ví dụ Postgres cloud). DB_USER/DB_PASS/DB_NAME/PORT riêng từng service, đặt ở khối của service
+  # Mặc định chung cho mọi service. Khối từng service đặt lại DB_* từ <SERVICE>_DB_* (DB cloud riêng từng service),
+  # thiếu thì rơi về đây rồi về Postgres trong Docker. Đặt DB_HOST cloud mà không đặt <SERVICE>_DB_USER/PASS là lỗi
+  # đăng nhập (mật khẩu dev) — gotchas.md
   DB_HOST: ${DB_HOST:-postgres}
   DB_PORT: ${DB_PORT:-5432}
   DB_SSL: ${DB_SSL:-false}
@@ -132,9 +134,13 @@ services:
     environment:
       <<: *common-env
       PORT: 3002
-      DB_USER: catalog_user
-      DB_PASS: catalog_pass
-      DB_NAME: catalog_db
+      # DB riêng của service; đặt CATALOG_DB_* trong .env để dùng DB cloud (không đặt: Postgres trong Docker)
+      DB_HOST: ${CATALOG_DB_HOST:-${DB_HOST:-postgres}}
+      DB_PORT: ${CATALOG_DB_PORT:-${DB_PORT:-5432}}
+      DB_SSL: ${CATALOG_DB_SSL:-${DB_SSL:-false}}
+      DB_USER: ${CATALOG_DB_USER:-catalog_user}
+      DB_PASS: ${CATALOG_DB_PASS:-catalog_pass}
+      DB_NAME: ${CATALOG_DB_NAME:-catalog_db}
       DB_LOGGING: ${DB_LOGGING:-false}
       # Không có key thật: để disabled, upload file trả 503, nhập URL ảnh vẫn dùng được (NT.CATALOG API_Spec §5)
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-disabled}
@@ -157,9 +163,13 @@ services:
     environment:
       <<: *common-env
       PORT: 3003
-      DB_USER: promotion_user
-      DB_PASS: promotion_pass
-      DB_NAME: promotion_db
+      # DB riêng của service; đặt PROMOTION_DB_* trong .env để dùng DB cloud (không đặt: Postgres trong Docker)
+      DB_HOST: ${PROMOTION_DB_HOST:-${DB_HOST:-postgres}}
+      DB_PORT: ${PROMOTION_DB_PORT:-${DB_PORT:-5432}}
+      DB_SSL: ${PROMOTION_DB_SSL:-${DB_SSL:-false}}
+      DB_USER: ${PROMOTION_DB_USER:-promotion_user}
+      DB_PASS: ${PROMOTION_DB_PASS:-promotion_pass}
+      DB_NAME: ${PROMOTION_DB_NAME:-promotion_db}
       DB_LOGGING: ${DB_LOGGING:-false}
     healthcheck: *node-health
 
@@ -174,9 +184,13 @@ services:
     environment:
       <<: *common-env
       PORT: 3001
-      DB_USER: identity_user
-      DB_PASS: identity_pass
-      DB_NAME: identity_db
+      # DB riêng của service; đặt IDENTITY_DB_* trong .env để dùng DB cloud (không đặt: Postgres trong Docker)
+      DB_HOST: ${IDENTITY_DB_HOST:-${DB_HOST:-postgres}}
+      DB_PORT: ${IDENTITY_DB_PORT:-${DB_PORT:-5432}}
+      DB_SSL: ${IDENTITY_DB_SSL:-${DB_SSL:-false}}
+      DB_USER: ${IDENTITY_DB_USER:-identity_user}
+      DB_PASS: ${IDENTITY_DB_PASS:-identity_pass}
+      DB_NAME: ${IDENTITY_DB_NAME:-identity_db}
       DB_LOGGING: ${DB_LOGGING:-false}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
@@ -212,9 +226,13 @@ services:
     environment:
       <<: *common-env
       PORT: 3004
-      DB_USER: order_user
-      DB_PASS: order_pass
-      DB_NAME: order_db
+      # DB riêng của service; đặt ORDER_DB_* trong .env để dùng DB cloud (không đặt: Postgres trong Docker)
+      DB_HOST: ${ORDER_DB_HOST:-${DB_HOST:-postgres}}
+      DB_PORT: ${ORDER_DB_PORT:-${DB_PORT:-5432}}
+      DB_SSL: ${ORDER_DB_SSL:-${DB_SSL:-false}}
+      DB_USER: ${ORDER_DB_USER:-order_user}
+      DB_PASS: ${ORDER_DB_PASS:-order_pass}
+      DB_NAME: ${ORDER_DB_NAME:-order_db}
       DB_LOGGING: ${DB_LOGGING:-false}
       # Giỏ hàng hỏi catalog (T3.1); identity, promotion dùng từ saga T3.3 — NT.ORDER API_Spec §4.
       # Không depends_on: catalog chết thì giỏ hàng vẫn xem được (degraded).
@@ -248,9 +266,13 @@ services:
     environment:
       <<: *common-env
       PORT: 3006
-      DB_USER: notification_user
-      DB_PASS: notification_pass
-      DB_NAME: notification_db
+      # DB riêng của service; đặt NOTIFICATION_DB_* trong .env để dùng DB cloud (không đặt: Postgres trong Docker)
+      DB_HOST: ${NOTIFICATION_DB_HOST:-${DB_HOST:-postgres}}
+      DB_PORT: ${NOTIFICATION_DB_PORT:-${DB_PORT:-5432}}
+      DB_SSL: ${NOTIFICATION_DB_SSL:-${DB_SSL:-false}}
+      DB_USER: ${NOTIFICATION_DB_USER:-notification_user}
+      DB_PASS: ${NOTIFICATION_DB_PASS:-notification_pass}
+      DB_NAME: ${NOTIFICATION_DB_NAME:-notification_db}
       DB_LOGGING: ${DB_LOGGING:-false}
     healthcheck: *node-health
 
@@ -262,9 +284,13 @@ services:
     environment:
       <<: *common-env
       PORT: 3007
-      DB_USER: assistant_user
-      DB_PASS: assistant_pass
-      DB_NAME: assistant_db
+      # DB riêng của service; đặt ASSISTANT_DB_* trong .env để dùng DB cloud (không đặt: Postgres trong Docker)
+      DB_HOST: ${ASSISTANT_DB_HOST:-${DB_HOST:-postgres}}
+      DB_PORT: ${ASSISTANT_DB_PORT:-${DB_PORT:-5432}}
+      DB_SSL: ${ASSISTANT_DB_SSL:-${DB_SSL:-false}}
+      DB_USER: ${ASSISTANT_DB_USER:-assistant_user}
+      DB_PASS: ${ASSISTANT_DB_PASS:-assistant_pass}
+      DB_NAME: ${ASSISTANT_DB_NAME:-assistant_db}
       DB_LOGGING: ${DB_LOGGING:-false}
     healthcheck: *node-health
 
