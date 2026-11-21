@@ -48,6 +48,17 @@ export interface OrderConfig {
   };
   services: ServicesConfig;
   checkout: CheckoutConfig;
+  payos: PayosConfig;
+}
+
+/** NT.PAYMENT API_Spec §5. PAYOS_BASE_URL do SDK tự đọc, không có ở đây */
+export interface PayosConfig {
+  clientId: string;
+  apiKey: string;
+  checksumKey: string;
+  returnUrl: string;
+  cancelUrl: string;
+  timeoutMs: number;
 }
 
 // Thiếu biến bắt buộc thì dừng khởi động, báo rõ tên biến (coding-convention §6)
@@ -102,6 +113,19 @@ export function checkoutConfig(
   };
 }
 
+// Mặc định dev như .env.example: chạy được không cần khoá PayOS thật (security-policy §1). be/ chỉ cảnh báo
+// khi thiếu khoá (be/src/config/payos.ts); nay có giá trị dev nên không cần cảnh báo.
+export function payosConfig(env: NodeJS.ProcessEnv = process.env): PayosConfig {
+  return {
+    clientId: env.PAYOS_CLIENT_ID ?? 'dev',
+    apiKey: env.PAYOS_API_KEY ?? 'dev',
+    checksumKey: env.PAYOS_CHECKSUM_KEY ?? 'dev-checksum',
+    returnUrl: env.PAYOS_RETURN_URL ?? 'http://localhost:3000/payment/success',
+    cancelUrl: env.PAYOS_CANCEL_URL ?? 'http://localhost:3000/payment/cancel',
+    timeoutMs: Number(env.PAYOS_TIMEOUT_MS ?? 5000),
+  };
+}
+
 export default (): OrderConfig => {
   assertRequiredEnv();
   return {
@@ -109,5 +133,6 @@ export default (): OrderConfig => {
     database: databaseConfig(),
     services: servicesConfig(),
     checkout: checkoutConfig(),
+    payos: payosConfig(),
   };
 };

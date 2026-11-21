@@ -94,3 +94,92 @@ export const cannotCancel = () =>
     ORD_ERROR.CANNOT_CANCEL,
     'Đơn hàng đã được xử lý, không thể huỷ',
   );
+
+// Catalog mã lỗi thanh toán — khớp NT.PAYMENT API_Spec §4 (giữ tiền tố PAY). Câu chữ giữ nguyên
+// be/src/users/payment, be/src/admin/payment; riêng 1006 (503) không đưa lỗi của PayOS ra client
+// (security-policy §5), 1010 mới do hạn giữ hàng (BR-19).
+export const PAY_ERROR = {
+  NOT_FOUND: 'NT-PAY-1001',
+  ORDER_NOT_PAYABLE: 'NT-PAY-1002',
+  ALREADY_EXISTS: 'NT-PAY-1003',
+  INVALID_WEBHOOK: 'NT-PAY-1004',
+  AMOUNT_MISMATCH: 'NT-PAY-1005',
+  PROVIDER_FAILED: 'NT-PAY-1006',
+  FORBIDDEN: 'NT-PAY-1007',
+  COD_ONLY: 'NT-PAY-1008',
+  INVALID_STATE: 'NT-PAY-1009',
+  EXPIRED: 'NT-PAY-1010',
+} as const;
+
+export const paymentOrderNotFound = () =>
+  new BusinessException(404, PAY_ERROR.NOT_FOUND, 'Không tìm thấy đơn hàng');
+
+export const paymentNotFound = () =>
+  new BusinessException(
+    404,
+    PAY_ERROR.NOT_FOUND,
+    'Không tìm thấy giao dịch thanh toán',
+  );
+
+export const orderNotPayable = (status: string) =>
+  new BusinessException(
+    400,
+    PAY_ERROR.ORDER_NOT_PAYABLE,
+    `Đơn hàng đang ở trạng thái "${status}", không thể tạo giao dịch thanh toán mới`,
+  );
+
+export const paymentExists = () =>
+  new BusinessException(
+    409,
+    PAY_ERROR.ALREADY_EXISTS,
+    'Đơn hàng này đã có giao dịch thanh toán, vui lòng kiểm tra trạng thái thay vì tạo mới',
+  );
+
+export const invalidWebhook = () =>
+  new BusinessException(400, PAY_ERROR.INVALID_WEBHOOK, 'Webhook không hợp lệ');
+
+export const amountMismatch = (
+  paid: number | string,
+  amount: number | string,
+) =>
+  new BusinessException(
+    400,
+    PAY_ERROR.AMOUNT_MISMATCH,
+    `Số tiền thanh toán (${paid}) không khớp số tiền giao dịch (${amount})`,
+  );
+
+export const providerFailed = () =>
+  new BusinessException(
+    503,
+    PAY_ERROR.PROVIDER_FAILED,
+    'Lỗi tạo link thanh toán PayOS, vui lòng thử lại',
+  );
+
+export const paymentForbidden = () =>
+  new BusinessException(
+    403,
+    PAY_ERROR.FORBIDDEN,
+    'Bạn không có quyền xem giao dịch này',
+  );
+
+export const codOnly = () =>
+  new BusinessException(
+    400,
+    PAY_ERROR.COD_ONLY,
+    'Chỉ áp dụng xác nhận cho giao dịch COD',
+  );
+
+// Hai câu của be/: markSuccess ("chuyển sang success"), confirmCod ("xác nhận thu tiền")
+export const invalidPaymentState = (status: string, action: string) =>
+  new BusinessException(
+    400,
+    PAY_ERROR.INVALID_STATE,
+    `Giao dịch đang ở trạng thái "${status}", không thể ${action}`,
+  );
+
+export const paymentExpired = () =>
+  new BusinessException(
+    400,
+    PAY_ERROR.EXPIRED,
+    'Đơn hàng đã hết hạn thanh toán',
+  );

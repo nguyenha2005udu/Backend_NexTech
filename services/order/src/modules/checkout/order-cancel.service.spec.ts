@@ -2,6 +2,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { DataSource, EntityManager } from 'typeorm';
 import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
+import type { PaymentCoreService } from '../payment/payment-core.service';
 import type { CompensationService } from './compensation.service';
 import { OrderCancelService } from './order-cancel.service';
 
@@ -27,9 +28,11 @@ describe('OrderCancelService', () => {
     ),
   };
   const compensation = { run: jest.fn() };
+  const paymentCore = { voidPendingByOrder: jest.fn() };
   const svc = new OrderCancelService(
     ds as unknown as DataSource,
     compensation as unknown as CompensationService,
+    paymentCore as unknown as PaymentCoreService,
     {
       getOrThrow: () => ({ budgetMs: 8000 }),
     } as unknown as ConfigService,
@@ -172,6 +175,11 @@ describe('OrderCancelService', () => {
         { order_id: 'o1', type: 'release_promotion', seq: 1 },
         { order_id: 'o1', type: 'release_stock', seq: 2 },
       ]);
+    });
+
+    it('giao dịch pending → failed trong cùng transaction (be/ releaseOrderResources, NT.PAYMENT §2)', async () => {
+      await svc.cancel(m as unknown as EntityManager, order(), 'user');
+      expect(paymentCore.voidPendingByOrder).toHaveBeenCalledWith(m, 'o1');
     });
 
     it('không gọi service khác trong transaction', async () => {

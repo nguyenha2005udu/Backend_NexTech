@@ -12,6 +12,8 @@ import {
 } from '../../test-helpers';
 import { CompensationService } from '../checkout/compensation.service';
 import { OrderCancelService } from '../checkout/order-cancel.service';
+import { PaymentCoreService } from '../payment/payment-core.service';
+import { PaymentLedgerService } from '../payment/payment-ledger.service';
 import { AdminOrderService } from './order.admin.service';
 
 // POSTGRES THẬT. Chạy: docker compose up -d postgres && npm run test:int -w services/order -- order.admin
@@ -35,13 +37,23 @@ describe('AdminOrderService (Postgres thật)', () => {
       catalog as unknown as CatalogClient,
       promotion as unknown as PromotionClient,
     );
-    const orderCancel = new OrderCancelService(db.ds, compensation, {
-      getOrThrow: () => ({ budgetMs: 8000 }),
-    } as unknown as ConfigService);
+    const paymentCore = new PaymentCoreService(
+      db.ds,
+      new PaymentLedgerService(db.ds),
+    );
+    const orderCancel = new OrderCancelService(
+      db.ds,
+      compensation,
+      paymentCore,
+      {
+        getOrThrow: () => ({ budgetMs: 8000 }),
+      } as unknown as ConfigService,
+    );
     service = new AdminOrderService(
       db.ds.getRepository(Order),
       db.ds,
       orderCancel,
+      paymentCore,
     );
   });
   afterAll(async () => db?.cleanup());
@@ -170,7 +182,7 @@ describe('AdminOrderService (Postgres thật)', () => {
   });
 
   it.each(['pending', 'paid'])(
-    'test 32: admin huỷ đơn %s → cancelled, task done, nhả kho; paid giữ giao dịch success; 4 truy vấn ở T3.5',
+    'test 32: admin huỷ đơn %s → cancelled, task done, nhả kho; paid giữ giao dịch success; 5 truy vấn ở T3.6 (có voidPendingByOrder)',
     async (from) => {
       const id = await seedOrder(db.ds, {
         user_id: randomUUID(),
@@ -211,7 +223,35 @@ describe('AdminOrderService (Postgres thật)', () => {
         );
         expect(p.status).toBe('success'); // hoàn tiền tay (be/)
       }
-      expect(n).toBe(4);
+      expect(n).toBe(5);
     },
   );
+
+  it('giao đơn COD (pending → shipped): giao dịch success cùng transaction; ≤ 6 truy vấn (T3.6)', async () => {
+    const id = await seedOrder(db.ds, {
+      user_id: randomUUID(),
+      status: 'pending',
+    });
+    await db.ds.query(
+      `INSERT INTO payments (order_id, method, amount, status) VALUES ($1, 'cod', 230000, 'pending')`,
+      [id],
+    );
+
+    const q = countQueries();
+    const res = await service.updateStatus(id, { status: 'shipped' });
+    const n = q.count;
+    q.restore();
+
+    expect(res).toMatchObject({ id, status: 'shipped' });
+    const [row] = await db.ds.query<
+      Array<{ o: string; p: string; paid: Date | null }>
+    >(
+      `SELECT o.status AS o, p.status AS p, p.paid_at AS paid FROM orders o JOIN payments p ON p.order_id = o.id WHERE o.id = $1`,
+      [id],
+    );
+    expect(row.o).toBe('shipped');
+    expect(row.p).toBe('success');
+    expect(row.paid).toBeInstanceOf(Date);
+    expect(n).toBeLessThanOrEqual(6);
+  });
 });

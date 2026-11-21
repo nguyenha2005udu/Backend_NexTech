@@ -1,9 +1,9 @@
 import { BusinessException } from '@nextech/service-kit';
-import { HttpException } from '@nestjs/common';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { Order, type OrderStatus } from '../../database/entities/order.entity';
 import { Payment } from '../../database/entities/payment.entity';
 import type { OrderCancelService } from '../checkout/order-cancel.service';
+import type { PaymentCoreService } from '../payment/payment-core.service';
 import { AdminOrderService } from './order.admin.service';
 
 // PUT /api/admin/orders/:id/status — NT.ORDER API_Spec §1 route 11, business-spec §5 (BR-06),
@@ -28,10 +28,12 @@ describe('AdminOrderService.updateStatus', () => {
   };
   const TASKS = [{ id: 't1', order_id: 'o1', type: 'release_stock', seq: 2 }];
   const orderCancel = { cancel: jest.fn(), releaseAfterCommit: jest.fn() };
+  const paymentCore = { confirmCodByOrder: jest.fn() };
   const service = new AdminOrderService(
     {} as Repository<Order>,
     dataSource as unknown as DataSource,
     orderCancel as unknown as OrderCancelService,
+    paymentCore as unknown as PaymentCoreService,
   );
 
   const givenOrder = (status: OrderStatus) =>
@@ -123,16 +125,23 @@ describe('AdminOrderService.updateStatus', () => {
     );
   });
 
-  // Giữ chỗ tới khi có code nền (quyết định 20-11-2026): giao COD cần confirmCodByOrder (T3.6)
-  it('pending → shipped (COD) hợp lệ nhưng chưa có code nền → 501, không ghi (T3.6 thay)', async () => {
+  // T3.6: giao COD xác nhận giao dịch trong cùng transaction (NT.ORDER API_Spec route 11 bước 4, NT.PAYMENT §5)
+  it('pending → shipped (COD pending): confirmCodByOrder cùng transaction rồi đổi đơn shipped', async () => {
     givenOrder('pending');
     givenPayment({ method: 'cod', status: 'pending' });
-    const err = await errorOf(
+    await expect(
       service.updateStatus('o1', { status: 'shipped' }),
+    ).resolves.toEqual({ id: 'o1', status: 'shipped', updated_at: UPDATED });
+    expect(paymentCore.confirmCodByOrder).toHaveBeenCalledWith(manager, 'o1');
+    expect(orderRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'o1', status: 'shipped' }),
     );
-    expect(err).toBeInstanceOf(HttpException);
-    expect((err as HttpException).getStatus()).toBe(501);
-    expect(orderRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('paid → shipped: không gọi confirmCodByOrder (giao dịch đã success)', async () => {
+    givenOrder('paid');
+    await service.updateStatus('o1', { status: 'shipped' });
+    expect(paymentCore.confirmCodByOrder).not.toHaveBeenCalled();
   });
 
   it.each<OrderStatus>(['pending', 'paid'])(

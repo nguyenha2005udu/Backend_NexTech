@@ -2,6 +2,7 @@ import {
   DB_REQUIRED,
   assertRequiredEnv,
   checkoutConfig,
+  payosConfig,
   databaseConfig,
   servicesConfig,
 } from './configuration';
@@ -114,5 +115,39 @@ describe('checkoutConfig', () => {
     expect(
       checkoutConfig({ RESILIENCE_ENABLED: 'true' }).resilienceEnabled,
     ).toBe(true);
+  });
+});
+
+// NT.PAYMENT API_Spec §5. PAYOS_BASE_URL không đọc ở đây: SDK tự đọc (compose mặc định mock, v2.7)
+describe('payosConfig', () => {
+  it('không đặt biến → mặc định dev, timeout 5000', () => {
+    expect(payosConfig({})).toEqual({
+      clientId: 'dev',
+      apiKey: 'dev',
+      checksumKey: 'dev-checksum',
+      returnUrl: 'http://localhost:3000/payment/success',
+      cancelUrl: 'http://localhost:3000/payment/cancel',
+      timeoutMs: 5000,
+    });
+  });
+
+  it('đọc biến, timeout thành số', () => {
+    expect(
+      payosConfig({
+        PAYOS_CLIENT_ID: 'c',
+        PAYOS_API_KEY: 'k',
+        PAYOS_CHECKSUM_KEY: 's',
+        PAYOS_RETURN_URL: 'r',
+        PAYOS_CANCEL_URL: 'x',
+        PAYOS_TIMEOUT_MS: '1500',
+      }),
+    ).toEqual({
+      clientId: 'c',
+      apiKey: 'k',
+      checksumKey: 's',
+      returnUrl: 'r',
+      cancelUrl: 'x',
+      timeoutMs: 1500,
+    });
   });
 });
