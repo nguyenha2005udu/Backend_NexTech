@@ -76,6 +76,16 @@ export function isBudgetExhausted(
   return deadline !== undefined && deadline - now < BUDGET_RESERVE_MS;
 }
 
+// Đơn quá SAGA_DEADLINE_MS mà đối soát chưa xong (Component_Class_Design §7, v1.7). Lỗi hạ tầng (≥ 500)
+// nên startForFailedSaga nhả Idempotency-Key: gửi lại cùng key thì tạo đơn mới.
+export function timeoutError(): BusinessException {
+  return new BusinessException(
+    504,
+    GEN_ERROR.UPSTREAM_TIMEOUT,
+    'Đặt hàng quá thời gian xử lý, vui lòng thử lại',
+  );
+}
+
 // Lỗi đã lưu của đơn failed (Component_Class_Design §6 lưu failure_*), dùng khi trả lại kết quả cũ
 export function failureError(order: Order): BusinessException {
   return new BusinessException(

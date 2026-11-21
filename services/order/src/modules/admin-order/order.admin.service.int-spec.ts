@@ -1,29 +1,55 @@
+import type { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
+import type { CatalogClient } from '../../clients/catalog.client';
+import type { PromotionClient } from '../../clients/promotion.client';
 import { Order } from '../../database/entities/order.entity';
+import { SagaTask } from '../../database/entities/saga-task.entity';
 import {
   countQueries,
   createTestDb,
   seedOrder,
   TestDb,
 } from '../../test-helpers';
+import { CompensationService } from '../checkout/compensation.service';
+import { OrderCancelService } from '../checkout/order-cancel.service';
 import { AdminOrderService } from './order.admin.service';
 
 // POSTGRES THẬT. Chạy: docker compose up -d postgres && npm run test:int -w services/order -- order.admin
 // findAll, findOne (QueryBuilder, subquery product_count, quan hệ payment) và updateStatus trên schema thật.
+// T3.5: admin huỷ qua OrderCancelService thật (client giả) — NT.CHECKOUT_SAGA test 32, 6 truy vấn khi đủ (v1.7).
 
 jest.setTimeout(60_000);
 
 describe('AdminOrderService (Postgres thật)', () => {
   let db: TestDb;
   let service: AdminOrderService;
+  const catalog = { release: jest.fn() };
+  const promotion = { release: jest.fn() };
 
   beforeAll(async () => {
     db = await createTestDb();
-    service = new AdminOrderService(db.ds.getRepository(Order), db.ds);
+    const compensation = new CompensationService(
+      db.ds.getRepository(Order),
+      db.ds.getRepository(SagaTask),
+      db.ds,
+      catalog as unknown as CatalogClient,
+      promotion as unknown as PromotionClient,
+    );
+    const orderCancel = new OrderCancelService(db.ds, compensation, {
+      getOrThrow: () => ({ budgetMs: 8000 }),
+    } as unknown as ConfigService);
+    service = new AdminOrderService(
+      db.ds.getRepository(Order),
+      db.ds,
+      orderCancel,
+    );
   });
   afterAll(async () => db?.cleanup());
   beforeEach(async () => {
+    jest.clearAllMocks();
     await db.ds.query('TRUNCATE orders CASCADE');
+    catalog.release.mockResolvedValue({ status: 'released', restored: true });
+    promotion.release.mockResolvedValue({ status: 'released', restored: true });
   });
   afterEach(() => jest.restoreAllMocks());
 
@@ -142,4 +168,50 @@ describe('AdminOrderService (Postgres thật)', () => {
     );
     expect(row.status).toBe('shipped');
   });
+
+  it.each(['pending', 'paid'])(
+    'test 32: admin huỷ đơn %s → cancelled, task done, nhả kho; paid giữ giao dịch success; 4 truy vấn ở T3.5',
+    async (from) => {
+      const id = await seedOrder(db.ds, {
+        user_id: randomUUID(),
+        status: from,
+      });
+      if (from === 'paid') {
+        await db.ds.query(
+          `INSERT INTO payments (order_id, method, amount, status) VALUES ($1, 'payos', 230000, 'success')`,
+          [id],
+        );
+      }
+
+      const q = countQueries();
+      const res = await service.updateStatus(id, { status: 'cancelled' });
+      const n = q.count;
+      q.restore();
+
+      expect(res).toMatchObject({ id, status: 'cancelled' });
+      expect(res.updated_at).toBeInstanceOf(Date);
+      const [row] = await db.ds.query<Array<{ status: string }>>(
+        `SELECT status FROM orders WHERE id = $1`,
+        [id],
+      );
+      expect(row.status).toBe('cancelled');
+      const tasks = await db.ds
+        .getRepository(SagaTask)
+        .findBy({ order_id: id });
+      expect(tasks.map((t) => `${t.type}:${t.status}`)).toEqual([
+        'release_stock:done',
+      ]);
+      expect(catalog.release).toHaveBeenCalledWith(id, {
+        deadline: expect.any(Number) as unknown,
+      });
+      if (from === 'paid') {
+        const [p] = await db.ds.query<Array<{ status: string }>>(
+          `SELECT status FROM payments WHERE order_id = $1`,
+          [id],
+        );
+        expect(p.status).toBe('success'); // hoàn tiền tay (be/)
+      }
+      expect(n).toBe(4);
+    },
+  );
 });

@@ -29,6 +29,15 @@ export function compensationTasks(
   return list;
 }
 
+export interface RunOptions {
+  /** Ngân sách còn lại của request (epoch ms); cron không truyền */
+  deadline?: number;
+  /** Task vừa insert, theo seq (huỷ đơn) — có thì không đọc lại */
+  tasks?: Array<Pick<SagaTask, 'id' | 'type'>>;
+  /** false: không chốt đơn failed khi xong (huỷ đơn). Mặc định true */
+  finish?: boolean;
+}
+
 // last_error: chỉ đích, lý do, mã — không lưu body của service đích (security-policy §5)
 function describeError(err: unknown): string {
   if (err instanceof UpstreamError) {
@@ -78,18 +87,23 @@ export class CompensationService {
       await m.insert(SagaTask, compensationTasks(order));
       return true;
     });
-    if (won) await this.run(order.id, deadline);
+    if (won) await this.run(order.id, { deadline });
   }
 
   /**
    * Chạy các task còn pending theo seq. Task lỗi không chặn task sau (hai lệnh nhả độc lập,
    * reliability-standard §7). Xong hết → finish. Hết ngân sách → dừng, phần còn lại để cron.
+   * v1.7: `tasks` — task bên gọi vừa insert (huỷ đơn), khỏi SELECT lại; `finish: false` — huỷ đơn
+   * không chốt failed (đơn đã cancelled, UPDATE luôn không khớp). Giữ request huỷ ở 6 truy vấn.
    */
-  async run(orderId: string, deadline?: number): Promise<void> {
-    const pending = await this.tasks.find({
-      where: { order_id: orderId, status: 'pending' },
-      order: { seq: 'ASC' },
-    });
+  async run(orderId: string, opts: RunOptions = {}): Promise<void> {
+    const { deadline, finish = true } = opts;
+    const pending =
+      opts.tasks ??
+      (await this.tasks.find({
+        where: { order_id: orderId, status: 'pending' },
+        order: { seq: 'ASC' },
+      }));
     const done: string[] = [];
     let allDone = true;
     for (const task of pending) {
@@ -101,9 +115,10 @@ export class CompensationService {
         await this.execute(task.type, orderId, deadline);
         done.push(task.id);
       } catch (err) {
+        // Tăng trong SQL (v1.7): request và cron cùng ghi lỗi một task không mất lần đếm
         await this.tasks.update(
           { id: task.id },
-          { attempts: task.attempts + 1, last_error: describeError(err) },
+          { attempts: () => '"attempts" + 1', last_error: describeError(err) },
         );
         allDone = false;
       }
@@ -115,7 +130,7 @@ export class CompensationService {
         { status: 'done', done_at: new Date() },
       );
     }
-    if (allDone) await this.finish(orderId);
+    if (allDone && finish) await this.finish(orderId);
   }
 
   private async execute(

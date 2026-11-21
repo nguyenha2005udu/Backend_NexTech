@@ -86,3 +86,11 @@ export const orderInProgress = () =>
     ORD_ERROR.ORDER_IN_PROGRESS,
     'Đơn hàng khác đang được xử lý, vui lòng đợi',
   );
+
+// Huỷ đơn (NT.CHECKOUT_SAGA API_Spec §2, BR-06). Câu chữ giữ nguyên be/src/users/order/order.service.ts cancel
+export const cannotCancel = () =>
+  new BusinessException(
+    400,
+    ORD_ERROR.CANNOT_CANCEL,
+    'Đơn hàng đã được xử lý, không thể huỷ',
+  );

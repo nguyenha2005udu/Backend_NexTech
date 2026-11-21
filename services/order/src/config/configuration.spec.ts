@@ -76,12 +76,14 @@ describe('servicesConfig', () => {
 
 // NT.ORDER API_Spec §4, NT.CHECKOUT_SAGA API_Spec §5: có mặc định, không bắt buộc
 describe('checkoutConfig', () => {
-  it('không đặt biến → mặc định 30000, 500000, 8000, 120000', () => {
+  it('không đặt biến → mặc định 30000, 500000, 8000, 120000, 10000, bật resilience', () => {
     expect(checkoutConfig({})).toEqual({
       shippingFee: 30000,
       freeShippingThreshold: 500000,
       budgetMs: 8000,
       deadlineMs: 120000,
+      reconcileIntervalMs: 10000,
+      resilienceEnabled: true,
     });
   });
 
@@ -92,12 +94,25 @@ describe('checkoutConfig', () => {
         FREE_SHIPPING_THRESHOLD: '100000',
         SAGA_BUDGET_MS: '3000',
         SAGA_DEADLINE_MS: '60000',
+        SAGA_RECONCILE_INTERVAL_MS: '5000',
       }),
     ).toEqual({
       shippingFee: 15000,
       freeShippingThreshold: 100000,
       budgetMs: 3000,
       deadlineMs: 60000,
+      reconcileIntervalMs: 5000,
+      resilienceEnabled: true,
     });
+  });
+
+  // RESILIENCE_ENABLED=false: đo baseline "chưa xử lý" — cron đối soát tắt (Component_Class_Design §7)
+  it('RESILIENCE_ENABLED=false → resilienceEnabled false; giá trị khác vẫn bật', () => {
+    expect(
+      checkoutConfig({ RESILIENCE_ENABLED: 'false' }).resilienceEnabled,
+    ).toBe(false);
+    expect(
+      checkoutConfig({ RESILIENCE_ENABLED: 'true' }).resilienceEnabled,
+    ).toBe(true);
   });
 });

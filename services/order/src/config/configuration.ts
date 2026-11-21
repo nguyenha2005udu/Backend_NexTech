@@ -1,7 +1,7 @@
 // Cấu hình order-service (NT.ORDER API_Spec §4). Khung T1.6: database. T3.1: URL 3 service.
 // Phần database lấy từ be/src/config/configuration.ts (như promotion), bỏ `synchronize`
 // (luôn tắt, chạy migration — coding-convention §5). Biến của nghiệp vụ thêm khi có code dùng:
-// SHIPPING_*, SAGA_* ở T3.3; PAYOS_* ở T3.6; REDIS_*, ORDER_HOLD_*, ORDER_LOCK_* ở T3.9–T3.10.
+// SHIPPING_*, SAGA_* ở T3.3; SAGA_RECONCILE_INTERVAL_MS, RESILIENCE_ENABLED ở T3.5; PAYOS_* ở T3.6; REDIS_*, ORDER_HOLD_*, ORDER_LOCK_* ở T3.9–T3.10.
 
 /** Đủ cho CLI migration (database/data-source.ts) */
 export const DB_REQUIRED = [
@@ -30,6 +30,10 @@ export interface CheckoutConfig {
   freeShippingThreshold: number;
   budgetMs: number;
   deadlineMs: number;
+  /** Chu kỳ cron đối soát (NT.CHECKOUT_SAGA Component_Class_Design §7) */
+  reconcileIntervalMs: number;
+  /** false: tắt cron đối soát khi đo baseline "chưa xử lý" (architecture §8) */
+  resilienceEnabled: boolean;
 }
 
 export interface OrderConfig {
@@ -92,6 +96,9 @@ export function checkoutConfig(
     freeShippingThreshold: Number(env.FREE_SHIPPING_THRESHOLD ?? 500000),
     budgetMs: Number(env.SAGA_BUDGET_MS ?? 8000),
     deadlineMs: Number(env.SAGA_DEADLINE_MS ?? 120000),
+    reconcileIntervalMs: Number(env.SAGA_RECONCILE_INTERVAL_MS ?? 10000),
+    // Cùng quy ước với ResilientHttpClient của service-kit: chỉ 'false' mới tắt
+    resilienceEnabled: env.RESILIENCE_ENABLED !== 'false',
   };
 }
 
