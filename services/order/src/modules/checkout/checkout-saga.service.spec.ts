@@ -1,4 +1,4 @@
-import { UpstreamBusinessError } from '@nextech/service-kit';
+import { UpstreamBusinessError, UpstreamError } from '@nextech/service-kit';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { In, Not } from 'typeorm';
 import type { CatalogClient } from '../../clients/catalog.client';
@@ -6,9 +6,11 @@ import type { PromotionClient } from '../../clients/promotion.client';
 import { CartItem } from '../../database/entities/cart-item.entity';
 import { Order } from '../../database/entities/order.entity';
 import { CheckoutSagaService } from './checkout-saga.service';
+import type { CompensationService } from './compensation.service';
 
 // NT.CHECKOUT_SAGA Component_Class_Design §4 (advance, setStep có điều kiện, ngân sách), §5 (confirm),
-// §8 test 2 (không mã → không gọi promotion), 21 (setStep không khớp → không confirm).
+// §8 test 2 (không mã → không gọi promotion), 21 (setStep không khớp → không confirm); handleError (v1.6,
+// Processing_Flow §3): 4xx / not_executed → hoàn tác + failed, unknown → in_doubt, lỗi khác ném lại.
 // Transaction thật, đua request/cron: checkout.service.int-spec.ts.
 
 describe('CheckoutSagaService.advance', () => {
@@ -25,11 +27,13 @@ describe('CheckoutSagaService.advance', () => {
   };
   const catalog = { reserve: jest.fn() };
   const promotion = { redeem: jest.fn() };
+  const compensation = { startForFailedSaga: jest.fn() };
   const saga = new CheckoutSagaService(
     orders as unknown as Repository<Order>,
     dataSource as unknown as DataSource,
     catalog as unknown as CatalogClient,
     promotion as unknown as PromotionClient,
+    compensation as unknown as CompensationService,
   );
 
   const FAR = Date.now() + 60_000;
@@ -229,16 +233,73 @@ describe('CheckoutSagaService.advance', () => {
     expect(catalog.reserve).not.toHaveBeenCalled();
   });
 
-  it('lỗi từ service đích: T3.3 ném lại, đơn để nguyên processing (hoàn tác ở T3.4)', async () => {
-    const err = new UpstreamBusinessError(
+  describe('handleError (Processing_Flow §3)', () => {
+    const outOfStock = new UpstreamBusinessError(
       'catalog',
       409,
       'NT-CAT-1001',
       'Hết hàng',
     );
-    catalog.reserve.mockRejectedValue(err);
 
-    await expect(saga.advance(order(), FAR)).rejects.toBe(err);
-    expect(orders.update).not.toHaveBeenCalled();
+    it('giữ kho 409 → hoàn tác với deadline, failed với lỗi gốc, không gọi promotion (test 4)', async () => {
+      catalog.reserve.mockRejectedValue(outOfStock);
+      const o = order({ discount_code: 'SALE10' });
+
+      const out = await saga.advance(o, FAR);
+
+      expect(out).toEqual({ kind: 'failed', error: outOfStock });
+      expect(compensation.startForFailedSaga).toHaveBeenCalledWith(
+        o,
+        outOfStock,
+        FAR,
+      );
+      expect(promotion.redeem).not.toHaveBeenCalled();
+      expect(m.update).not.toHaveBeenCalled();
+    });
+
+    it('dùng mã 4xx → hoàn tác từ bước stock_reserved (test 5)', async () => {
+      const bad = new UpstreamBusinessError(
+        'promotion',
+        400,
+        'NT-PRM-1006',
+        'Hết lượt',
+      );
+      promotion.redeem.mockRejectedValue(bad);
+
+      const out = await saga.advance(order({ discount_code: 'HETLUOT' }), FAR);
+
+      expect(out).toEqual({ kind: 'failed', error: bad });
+      const [o] = compensation.startForFailedSaga.mock.calls[0] as [Order];
+      expect(o.saga_step).toBe('stock_reserved');
+    });
+
+    it('not_executed (từ chối kết nối, mạch mở) → hoàn tác, failed 503 (test 6, 8)', async () => {
+      const down = new UpstreamError('catalog', 'ECONNREFUSED', 'not_executed');
+      catalog.reserve.mockRejectedValue(down);
+
+      const out = await saga.advance(order(), FAR);
+
+      expect(out).toEqual({ kind: 'failed', error: down });
+      expect(compensation.startForFailedSaga).toHaveBeenCalled();
+    });
+
+    it('unknown (timeout, 5xx) → in_doubt, không hoàn tác (test 7, 9)', async () => {
+      catalog.reserve.mockRejectedValue(
+        new UpstreamError('catalog', 'timeout', 'unknown', 504),
+      );
+
+      const out = await saga.advance(order(), FAR);
+
+      expect(out.kind).toBe('in_doubt');
+      expect(compensation.startForFailedSaga).not.toHaveBeenCalled();
+    });
+
+    it('lỗi khác (DB, RESILIENCE_ENABLED=false) → ném lại, không hoàn tác', async () => {
+      const boom = new Error('Service catalog trả 500');
+      catalog.reserve.mockRejectedValue(boom);
+
+      await expect(saga.advance(order(), FAR)).rejects.toBe(boom);
+      expect(compensation.startForFailedSaga).not.toHaveBeenCalled();
+    });
   });
 });

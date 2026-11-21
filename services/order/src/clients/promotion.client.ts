@@ -34,11 +34,15 @@ export class PromotionClient {
     });
   }
 
-  release(orderId: string): Promise<{ status: 'released'; restored: boolean }> {
+  release(
+    orderId: string,
+    opts: CallOptions = {},
+  ): Promise<{ status: 'released'; restored: boolean }> {
     return this.http.request({
       method: 'DELETE',
       path: `/internal/redemptions/${encodeURIComponent(orderId)}`,
       retry: true,
+      deadline: opts.deadline,
     });
   }
 }
