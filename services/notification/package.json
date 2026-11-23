@@ -12,7 +12,8 @@
     "lint": "eslint \"src/**/*.ts\" --fix",
     "test": "tsc --noEmit -p tsconfig.json && jest",
     "migration:generate": "npm run build && typeorm migration:generate -d dist/database/data-source.js",
-    "migration:run": "npm run build && typeorm migration:run -d dist/database/data-source.js"
+    "migration:run": "npm run build && typeorm migration:run -d dist/database/data-source.js",
+    "test:int": "jest --runInBand --testRegex \"\\.int-spec\\.ts$\" --"
   },
   "jest": {
     "moduleFileExtensions": [
@@ -36,9 +37,13 @@
     "@nextech/service-kit": "*",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "nodemailer": "^9.1.1",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "typeorm": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2"
   }
 }
