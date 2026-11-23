@@ -7,6 +7,7 @@ import { SagaTask } from '../../database/entities/saga-task.entity';
 import {
   countQueries,
   createTestDb,
+  noLock,
   seedOrder,
   TestDb,
 } from '../../test-helpers';
@@ -40,6 +41,7 @@ describe('AdminOrderService (Postgres thật)', () => {
     const paymentCore = new PaymentCoreService(
       db.ds,
       new PaymentLedgerService(db.ds),
+      noLock,
     );
     const orderCancel = new OrderCancelService(
       db.ds,
@@ -48,12 +50,14 @@ describe('AdminOrderService (Postgres thật)', () => {
       {
         getOrThrow: () => ({ budgetMs: 8000 }),
       } as unknown as ConfigService,
+      noLock,
     );
     service = new AdminOrderService(
       db.ds.getRepository(Order),
       db.ds,
       orderCancel,
       paymentCore,
+      noLock,
     );
   });
   afterAll(async () => db?.cleanup());

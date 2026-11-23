@@ -6,9 +6,11 @@ import { Payment } from '../../database/entities/payment.entity';
 import {
   countQueries,
   createTestDb,
+  noLock,
   seedOrder,
   TestDb,
 } from '../../test-helpers';
+import { OrderLockBusyError } from '../../database/db-lock-error';
 import { PaymentCoreService } from './payment-core.service';
 import { PaymentLedgerService } from './payment-ledger.service';
 import { PaymentService } from './payment.service';
@@ -37,7 +39,11 @@ describe('PaymentService (Postgres thật)', () => {
 
   beforeAll(async () => {
     db = await createTestDb();
-    const core = new PaymentCoreService(db.ds, new PaymentLedgerService(db.ds));
+    const core = new PaymentCoreService(
+      db.ds,
+      new PaymentLedgerService(db.ds),
+      noLock,
+    );
     service = new PaymentService(
       db.ds.getRepository(Order),
       db.ds.getRepository(Payment),
@@ -316,6 +322,23 @@ describe('PaymentService (Postgres thật)', () => {
       expect(r).toMatchObject({ id: s.paymentId, status: 'success' });
       expect(r.paid_at).toBeInstanceOf(Date);
       expect((await orderOf(s.orderId)).status).toBe('paid');
+    });
+
+    it('PAID nhưng khoá đơn bận → không chờ (waitMs 0), trả trạng thái đang lưu (NT.PAYMENT Processing_Flow, BR-20)', async () => {
+      const s = await payosPayment();
+      payos.paymentRequests.get.mockResolvedValue({
+        status: 'PAID',
+        amountPaid: 230000,
+        orderCode: 1,
+      });
+      const spy = jest
+        .spyOn(PaymentCoreService.prototype, 'markSuccess')
+        .mockRejectedValue(new OrderLockBusyError(s.orderId));
+      const r = await service.getStatus(s.userId, s.paymentId);
+      expect(spy).toHaveBeenCalledWith(expect.anything(), { waitMs: 0 });
+      spy.mockRestore();
+      expect(r.status).toBe('pending');
+      expect((await orderOf(s.orderId)).status).toBe('pending');
     });
 
     it('PayOS báo CANCELLED → failed', async () => {

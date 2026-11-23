@@ -11,7 +11,8 @@ import { DataSource, Repository } from 'typeorm';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { Payment } from '../../database/entities/payment.entity';
-import { invalidTransition, orderNotFound } from '../../errors';
+import { invalidTransition, lockBusyTo409, orderNotFound } from '../../errors';
+import { OrderLockService } from '../../redis/order-lock.service';
 import { OrderCancelService } from '../checkout/order-cancel.service';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { paymentExpiresAt } from '../order/order.service';
@@ -36,6 +37,7 @@ export class AdminOrderService {
     private readonly dataSource: DataSource,
     private readonly orderCancel: OrderCancelService,
     private readonly paymentCore: PaymentCoreService,
+    private readonly lock: OrderLockService,
   ) {}
 
   // GET /api/admin/orders — 2 truy vấn: count + data (product_count là subquery, không nhân dòng)
@@ -135,9 +137,19 @@ export class AdminOrderService {
   }
 
   // PUT /api/admin/orders/:id/status (API_Spec §1 route 11).
-  // Khoá dòng Postgres như be/; khoá Redis withOrderLock (BR-20) bọc thêm ở T3.9.
+  // Khoá đơn có thời hạn (BR-20, T3.9) bọc ngoài, bận → 409 NT-ORD-1012; trong đó khoá dòng Postgres như be/.
   async updateStatus(id: string, dto: UpdateOrderStatusDto) {
-    const r = await this.dataSource.transaction(async (manager) => {
+    const r = await this.lock
+      .withOrderLock(id, () => this.updateStatusTx(id, dto))
+      .catch(lockBusyTo409);
+
+    // Sau commit, giống người mua huỷ: nhả trong ngân sách, lỗi thì cron. T3.10: unschedule hạn giữ hàng.
+    if (r.tasks) await this.orderCancel.releaseAfterCommit(id, r.tasks);
+    return r.result;
+  }
+
+  private updateStatusTx(id: string, dto: UpdateOrderStatusDto) {
+    return this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
 
       // Khoá dòng đơn để không đua với người mua tự huỷ / webhook thanh toán.
@@ -189,9 +201,5 @@ export class AdminOrderService {
         tasks: null,
       };
     });
-
-    // Sau commit, giống người mua huỷ: nhả trong ngân sách, lỗi thì cron. T3.10: unschedule hạn giữ hàng.
-    if (r.tasks) await this.orderCancel.releaseAfterCommit(id, r.tasks);
-    return r.result;
   }
 }

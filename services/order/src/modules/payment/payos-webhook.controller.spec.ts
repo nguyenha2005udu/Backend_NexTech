@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { BusinessException } from '@nextech/service-kit';
 import { PayOS, WebhookError, type Webhook } from '@payos/node';
 import { createHmac } from 'node:crypto';
+import { OrderLockBusyError } from '../../database/db-lock-error';
 import type { PaymentCoreService } from './payment-core.service';
 import type {
   PaymentLedgerService,
@@ -138,6 +139,17 @@ describe('PayosWebhookController', () => {
   it('lỗi khác (DB) → ném (500), sổ giữ received để PayOS gửi lại', async () => {
     core.markSuccess.mockRejectedValue(new Error('db lỗi'));
     await expect(ctrl.handle(body(data()))).rejects.toThrow('db lỗi');
+    expect(ledger.settle).not.toHaveBeenCalled();
+  });
+
+  it('khoá đơn bận (Redis hoặc 55P03) → 503 NT-GEN-0503 để PayOS gửi lại; sổ giữ received (NT.PAYMENT §2, BR-20)', async () => {
+    core.markSuccess.mockRejectedValue(new OrderLockBusyError('o1', 'db'));
+    const err = (await ctrl
+      .handle(body(data()))
+      .catch((e: unknown) => e)) as BusinessException;
+    expect(err).toBeInstanceOf(BusinessException);
+    expect(err.getStatus()).toBe(503);
+    expect(err.code).toBe('NT-GEN-0503');
     expect(ledger.settle).not.toHaveBeenCalled();
   });
 

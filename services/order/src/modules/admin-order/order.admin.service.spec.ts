@@ -3,6 +3,8 @@ import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { Order, type OrderStatus } from '../../database/entities/order.entity';
 import { Payment } from '../../database/entities/payment.entity';
 import type { OrderCancelService } from '../checkout/order-cancel.service';
+import { OrderLockBusyError } from '../../database/db-lock-error';
+import type { OrderLockService } from '../../redis/order-lock.service';
 import type { PaymentCoreService } from '../payment/payment-core.service';
 import { AdminOrderService } from './order.admin.service';
 
@@ -29,11 +31,13 @@ describe('AdminOrderService.updateStatus', () => {
   const TASKS = [{ id: 't1', order_id: 'o1', type: 'release_stock', seq: 2 }];
   const orderCancel = { cancel: jest.fn(), releaseAfterCommit: jest.fn() };
   const paymentCore = { confirmCodByOrder: jest.fn() };
+  const lock = { withOrderLock: jest.fn() };
   const service = new AdminOrderService(
     {} as Repository<Order>,
     dataSource as unknown as DataSource,
     orderCancel as unknown as OrderCancelService,
     paymentCore as unknown as PaymentCoreService,
+    lock as unknown as OrderLockService,
   );
 
   const givenOrder = (status: OrderStatus) =>
@@ -54,6 +58,26 @@ describe('AdminOrderService.updateStatus', () => {
       tasks: TASKS,
     });
     orderCancel.releaseAfterCommit.mockResolvedValue(undefined);
+    lock.withOrderLock.mockImplementation(
+      (_id: string, fn: () => Promise<unknown>) => fn(),
+    );
+  });
+
+  it('bọc withOrderLock theo id đơn (BR-20, NT.ORDER route 11 bước 4)', async () => {
+    givenOrder('paid');
+    await service.updateStatus('o1', { status: 'shipped' });
+    expect(lock.withOrderLock).toHaveBeenCalledWith('o1', expect.any(Function));
+  });
+
+  it('khoá đơn bận → 409 NT-ORD-1012, đơn không đổi, không nhả (NT.ORDER §7)', async () => {
+    lock.withOrderLock.mockRejectedValue(new OrderLockBusyError('o1', 'db'));
+    const err = await errorOf(
+      service.updateStatus('o1', { status: 'cancelled' }),
+    );
+    expect((err as BusinessException).code).toBe('NT-ORD-1012');
+    expect((err as BusinessException).getStatus()).toBe(409);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(orderCancel.releaseAfterCommit).not.toHaveBeenCalled();
   });
 
   it('khoá dòng đơn trong transaction (FOR UPDATE, như be/)', async () => {

@@ -8,6 +8,7 @@ import { SagaTask } from '../../database/entities/saga-task.entity';
 import {
   countQueries,
   createTestDb,
+  noLock,
   seedOrder,
   TestDb,
 } from '../../test-helpers';
@@ -31,10 +32,11 @@ describe('OrderCancelService (Postgres thật)', () => {
     new OrderCancelService(
       db.ds,
       compensation,
-      new PaymentCoreService(db.ds, new PaymentLedgerService(db.ds)),
+      new PaymentCoreService(db.ds, new PaymentLedgerService(db.ds), noLock),
       {
         getOrThrow: () => ({ budgetMs }),
       } as unknown as ConfigService,
+      noLock,
     );
   let service: OrderCancelService;
 
