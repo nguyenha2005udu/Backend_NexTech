@@ -274,6 +274,14 @@ services:
       # lock_timeout, idle_in_transaction_session_timeout của kết nối ứng dụng (BR-20: WAIT + LOCK_TIMEOUT ≤ 3000)
       DB_LOCK_TIMEOUT_MS: ${DB_LOCK_TIMEOUT_MS:-1000}
       DB_IDLE_TX_TIMEOUT_MS: ${DB_IDLE_TX_TIMEOUT_MS:-15000}
+      # Hạn giữ hàng + job huỷ quá hạn (T3.10 — NT.ORDER_HOLD API_Spec §5, BR-19). Kiểm chứng nhanh: TTL 60000, GRACE 5000
+      ORDER_HOLD_TTL_MS: ${ORDER_HOLD_TTL_MS:-900000}
+      ORDER_HOLD_GRACE_MS: ${ORDER_HOLD_GRACE_MS:-60000}
+      ORDER_HOLD_SWEEP_INTERVAL_MS: ${ORDER_HOLD_SWEEP_INTERVAL_MS:-15000}
+      ORDER_HOLD_DB_SWEEP_EVERY: ${ORDER_HOLD_DB_SWEEP_EVERY:-20}
+      ORDER_HOLD_BATCH: ${ORDER_HOLD_BATCH:-50}
+      ORDER_HOLD_DEFER_BACKOFF_MS: ${ORDER_HOLD_DEFER_BACKOFF_MS:-60000}
+      ORDER_HOLD_MAX_DEFER_MS: ${ORDER_HOLD_MAX_DEFER_MS:-600000}
     healthcheck: *node-health
 
   notification-service:
