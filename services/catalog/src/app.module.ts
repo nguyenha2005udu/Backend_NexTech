@@ -3,7 +3,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
-import { HealthModule, typeOrmHealthCheck } from '@nextech/service-kit';
+import {
+  HealthModule,
+  OutboxPublisher,
+  rabbitHealthCheck,
+  typeOrmHealthCheck,
+} from '@nextech/service-kit';
+import { OutboxModule } from './outbox/outbox.module';
 import configuration from './config/configuration';
 import { seedDemo } from './database/seed';
 import { dataSourceOptions } from './database/typeorm-options';
@@ -28,8 +34,10 @@ import { PriceAlertModule } from './modules/price-alert/price-alert.module';
     // RabbitMQ (T4.1) chỉ báo trạng thái, không làm /health 503 (reliability-standard §5)
     HealthModule.forRoot({
       service: 'catalog',
-      checks: [typeOrmHealthCheck()],
+      checks: [typeOrmHealthCheck(), rabbitHealthCheck(OutboxPublisher)],
     }),
+    // Gửi price.alert.triggered từ outbox (T4.4)
+    OutboxModule,
     ProductModule,
     CategoryModule,
     IndustryModule,

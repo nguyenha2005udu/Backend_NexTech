@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { BusinessException } from '@nextech/service-kit';
+import {
+  BusinessException,
+  OutboxEvent,
+  type EventEnvelope,
+} from '@nextech/service-kit';
 import { PriceAlert } from '../../database/entities/price-alert.entity';
 import { Product } from '../../database/entities/product.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
@@ -48,6 +52,15 @@ describe('PriceAlertService (Postgres thật)', () => {
     );
   const statusOf = async (id: string) =>
     db.ds.getRepository(PriceAlert).findOneByOrFail({ id });
+  // Sự kiện price.alert.triggered của một sản phẩm trong outbox (T4.4)
+  const outboxOf = async (productId: string) =>
+    (
+      await db.ds.getRepository(OutboxEvent).find({
+        where: { routing_key: 'price.alert.triggered' },
+      })
+    )
+      .map((r) => r.payload as EventEnvelope<Record<string, unknown>>)
+      .filter((e) => e.data.product_id === productId);
 
   it('hai request theo dõi giá cùng lúc, cùng người, cùng sản phẩm → một 201, một 409 NT-CAT-1008 (BR-12)', async () => {
     const p = await addProduct(200_000);
@@ -107,6 +120,20 @@ describe('PriceAlertService (Postgres thật)', () => {
       expect((await statusOf(cancelled.id)).status).toBe('cancelled');
       // Chạy lại: không còn gì để đổi
       await expect(service.checkAndTriggerAlerts()).resolves.toBe(0);
+
+      // T4.4: đúng một sự kiện price.alert.triggered cho mỗi alert vừa đổi, cùng transaction
+      const events = await outboxOf(cheap.id);
+      expect(events.map((e) => e.data.alert_id).sort()).toEqual(
+        [hit.id, equal.id].sort(),
+      );
+      const ev = events.find((e) => e.data.alert_id === hit.id)!;
+      expect(ev.type).toBe('price.alert.triggered');
+      expect(ev.data).toMatchObject({
+        product_id: cheap.id,
+        current_price: 90_000,
+        target_price: 100_000,
+        channel: 'app',
+      });
     });
 
     it('hơn 100 alert chạm ngưỡng → xử lý hết theo lô', async () => {
@@ -137,6 +164,8 @@ describe('PriceAlertService (Postgres thật)', () => {
       expect(
         await db.ds.getRepository(PriceAlert).countBy({ status: 'triggered' }),
       ).toBe(150);
+      // T4.4: mỗi lần chạm ngưỡng chỉ một sự kiện
+      expect(await outboxOf(p.id)).toHaveLength(150);
     });
   });
 });

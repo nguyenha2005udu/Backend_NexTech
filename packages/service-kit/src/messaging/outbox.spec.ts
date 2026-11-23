@@ -31,6 +31,22 @@ describe('OutboxWriter', () => {
     expect(parseEnvelope(JSON.stringify(env)).event_id).toBe(env.event_id);
   });
 
+  it('enqueueMany: một câu INSERT cho cả lô, rỗng thì không truy vấn', async () => {
+    const insert = jest.fn().mockResolvedValue(undefined);
+    const m = { insert } as unknown as EntityManager;
+    const w = new OutboxWriter('catalog');
+    await expect(
+      w.enqueueMany(m, 'price.alert.triggered', []),
+    ).resolves.toEqual([]);
+    expect(insert).not.toHaveBeenCalled();
+    const envs = await w.enqueueMany(m, 'price.alert.triggered', [
+      { alert_id: 'a' },
+      { alert_id: 'b' },
+    ]);
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(new Set(envs.map((e) => e.event_id)).size).toBe(2);
+  });
+
   it('insert lỗi (transaction rollback): lỗi truyền lên bên gọi', async () => {
     const m = {
       insert: jest.fn().mockRejectedValue(new Error('rollback')),

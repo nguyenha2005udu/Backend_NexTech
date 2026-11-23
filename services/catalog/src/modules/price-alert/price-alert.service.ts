@@ -8,7 +8,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Cron } from '@nestjs/schedule';
-import { BusinessException } from '@nextech/service-kit';
+import { BusinessException, OutboxWriter } from '@nextech/service-kit';
 import { In, Repository } from 'typeorm';
 import { servicesConfig } from '../../config/configuration';
 import { PriceAlert } from '../../database/entities/price-alert.entity';
@@ -20,6 +20,19 @@ import { CreatePriceAlertDto } from './price-alert.dto';
 
 // Số alert mỗi lô cron: một câu UPDATE mỗi lô, không phụ thuộc tổng số alert (non-functional §1)
 const ALERT_BATCH = 100;
+
+// Sự kiện price.alert.triggered (NT.MESSAGING API_Spec §3, T4.4)
+const priceAlertEvents = new OutboxWriter('catalog');
+
+interface TriggeredRow {
+  id: string;
+  user_id: string;
+  product_id: string;
+  product_name: string;
+  current_price: string;
+  target_price: string;
+  notify_channel: string;
+}
 
 const alertExists = () =>
   new BusinessException(
@@ -156,26 +169,45 @@ export class PriceAlertService {
    * rồi save từng alert (1 + n truy vấn); nay 1 truy vấn mỗi lô 100, không phụ thuộc số alert.
    * Không đổi trùng: chỉ dòng `UPDATE ... AND status='active'` thật sự đổi được mới được tính;
    * `SKIP LOCKED` để hai lượt chạy chồng (hoặc hai bản catalog) lấy lô khác nhau thay vì chờ nhau.
-   * T4.4: chèn outbox price.alert.triggered cho đúng các dòng RETURNING, cùng transaction.
+   * T4.4: chèn outbox price.alert.triggered cho đúng các dòng RETURNING, cùng transaction (một INSERT mỗi
+   * lô). Một lần chạm ngưỡng chỉ một sự kiện: dòng đã triggered không khớp `status = 'active'` lần sau.
    * @returns số alert vừa chuyển triggered
    */
   async checkAndTriggerAlerts(): Promise<number> {
     let total = 0;
     for (;;) {
-      // Truy vấn thô: QueryBuilder không dựng được UPDATE với câu con JOIN + LIMIT + FOR UPDATE SKIP LOCKED.
-      // Tham số hoá, không nối chuỗi.
-      const [, count] = await this.alertRepo.query<[unknown[], number]>(
-        `UPDATE price_alerts SET status = 'triggered', triggered_at = now()
-         WHERE id IN (
-           SELECT a.id FROM price_alerts a
-           JOIN products p ON p.id = a.product_id
-           WHERE a.status = 'active' AND p.price <= a.target_price
-           LIMIT $1
-           FOR UPDATE OF a SKIP LOCKED
-         ) AND status = 'active'
-         RETURNING id`,
-        [ALERT_BATCH],
-      );
+      const count = await this.alertRepo.manager.transaction(async (m) => {
+        // Truy vấn thô: QueryBuilder không dựng được UPDATE với câu con JOIN + LIMIT + FOR UPDATE SKIP LOCKED.
+        // Tham số hoá, không nối chuỗi. FROM products: lấy tên, giá hiện tại cho sự kiện.
+        const [rows, n] = await m.query<[TriggeredRow[], number]>(
+          `UPDATE price_alerts a SET status = 'triggered', triggered_at = now()
+           FROM products p
+           WHERE p.id = a.product_id AND a.status = 'active' AND a.id IN (
+             SELECT x.id FROM price_alerts x
+             JOIN products px ON px.id = x.product_id
+             WHERE x.status = 'active' AND px.price <= x.target_price
+             LIMIT $1
+             FOR UPDATE OF x SKIP LOCKED
+           )
+           RETURNING a.id, a.user_id, a.product_id, p.name AS product_name,
+                     p.price AS current_price, a.target_price, a.notify_channel`,
+          [ALERT_BATCH],
+        );
+        await priceAlertEvents.enqueueMany(
+          m,
+          'price.alert.triggered',
+          rows.map((r) => ({
+            alert_id: r.id,
+            user_id: r.user_id,
+            product_id: r.product_id,
+            product_name: r.product_name,
+            current_price: Number(r.current_price),
+            target_price: Number(r.target_price),
+            channel: r.notify_channel,
+          })),
+        );
+        return n;
+      });
       total += count;
       if (count < ALERT_BATCH) return total;
     }

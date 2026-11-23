@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { OutboxEvent } from '@nextech/service-kit';
 import type { DataSourceOptions } from 'typeorm';
 import { databaseConfig } from '../config/configuration';
 
@@ -15,7 +16,8 @@ export function dataSourceOptions(
     password: db.password,
     database: db.name,
     ssl: db.ssl ? { rejectUnauthorized: false } : false,
-    entities: [join(__dirname, 'entities', '*.entity.{ts,js}')],
+    // OutboxEvent: bảng outbox của service-kit (NT.MESSAGING API_Spec §4, T4.1)
+    entities: [join(__dirname, 'entities', '*.entity.{ts,js}'), OutboxEvent],
     migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
     synchronize: false,
     // Bật để đếm số truy vấn mỗi endpoint (non-functional-standards §1)
