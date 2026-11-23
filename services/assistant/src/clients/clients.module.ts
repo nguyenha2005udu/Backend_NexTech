@@ -5,6 +5,7 @@ import type { AiConfig } from '../config/configuration';
 import { SEARCH_PRODUCTS_TOOL } from '../modules/chat/system-prompt';
 import { CatalogClient } from './catalog.client';
 import { FptAiClient } from './fpt-ai.client';
+import { IdentityClient } from './identity.client';
 
 // Client tới service khác và FPT AI (design/ASSISTANT/README.md §3), mỗi client một ResilientHttpClient
 // (mạch riêng theo đích). URL lấy từ env (architecture §8). Khuôn: order/src/clients.
@@ -18,6 +19,17 @@ import { FptAiClient } from './fpt-ai.client';
           new ResilientHttpClient({
             target: 'catalog',
             baseUrl: config.getOrThrow<string>('services.catalogUrl'),
+          }),
+        ),
+    },
+    {
+      provide: IdentityClient,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        new IdentityClient(
+          new ResilientHttpClient({
+            target: 'identity',
+            baseUrl: config.getOrThrow<string>('services.identityUrl'),
           }),
         ),
     },
@@ -43,6 +55,6 @@ import { FptAiClient } from './fpt-ai.client';
       },
     },
   ],
-  exports: [CatalogClient, FptAiClient],
+  exports: [CatalogClient, IdentityClient, FptAiClient],
 })
 export class ClientsModule {}

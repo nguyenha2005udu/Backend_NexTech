@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { HealthModule, typeOrmHealthCheck } from '@nextech/service-kit';
 import configuration from './config/configuration';
 import { dataSourceOptions } from './database/typeorm-options';
+import { ConversationAdminModule } from './modules/admin-conversation/conversation.admin.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 
@@ -22,6 +23,7 @@ import { ConversationModule } from './modules/conversation/conversation.module';
     }),
     ChatModule,
     ConversationModule,
+    ConversationAdminModule,
   ],
 })
 export class AppModule {}
