@@ -5,6 +5,7 @@ import { Order } from '../../database/entities/order.entity';
 import {
   countQueries,
   createTestDb,
+  noLock,
   seedOrder,
   TestDb,
 } from '../../test-helpers';
@@ -32,7 +33,11 @@ describe('AdminStatisticsService.getOverview (Postgres thật)', () => {
 
   beforeAll(async () => {
     db = await createTestDb();
-    const core = new PaymentCoreService(db.ds, new PaymentLedgerService(db.ds));
+    const core = new PaymentCoreService(
+      db.ds,
+      new PaymentLedgerService(db.ds),
+      noLock,
+    );
     service = new AdminStatisticsService(
       db.ds.getRepository(Order),
       core,

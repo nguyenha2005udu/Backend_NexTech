@@ -1,7 +1,7 @@
 // Cấu hình order-service (NT.ORDER API_Spec §4). Khung T1.6: database. T3.1: URL 3 service.
 // Phần database lấy từ be/src/config/configuration.ts (như promotion), bỏ `synchronize`
 // (luôn tắt, chạy migration — coding-convention §5). Biến của nghiệp vụ thêm khi có code dùng:
-// SHIPPING_*, SAGA_* ở T3.3; SAGA_RECONCILE_INTERVAL_MS, RESILIENCE_ENABLED ở T3.5; PAYOS_* ở T3.6; REDIS_*, ORDER_HOLD_*, ORDER_LOCK_* ở T3.9–T3.10.
+// SHIPPING_*, SAGA_* ở T3.3; SAGA_RECONCILE_INTERVAL_MS, RESILIENCE_ENABLED ở T3.5; PAYOS_* ở T3.6; REDIS_*, ORDER_LOCK_*, DB_LOCK_TIMEOUT_MS, DB_IDLE_TX_TIMEOUT_MS ở T3.9; ORDER_HOLD_* ở T3.10.
 
 /** Đủ cho CLI migration (database/data-source.ts) */
 export const DB_REQUIRED = [
@@ -49,6 +49,33 @@ export interface OrderConfig {
   services: ServicesConfig;
   checkout: CheckoutConfig;
   payos: PayosConfig;
+  redis: RedisConfig;
+  orderLock: OrderLockConfig;
+  dbLock: DbLockConfig;
+}
+
+/** NT.ORDER_HOLD API_Spec §5, Component_Class_Design §2: client Redis trả lỗi nhanh, DB 1 (tách identity) */
+export interface RedisConfig {
+  host: string;
+  port: number;
+  password: string | undefined;
+  tls: boolean;
+  db: number;
+  commandTimeoutMs: number;
+  connectTimeoutMs: number;
+}
+
+/** Khoá đơn có thời hạn (BR-20, NT.ORDER_HOLD §3, §5) */
+export interface OrderLockConfig {
+  ttlMs: number;
+  waitMs: number;
+  retryMs: number;
+}
+
+/** Tham số kết nối Postgres của ứng dụng (NT.ORDER_HOLD Component_Class_Design §9) */
+export interface DbLockConfig {
+  lockTimeoutMs: number;
+  idleTxTimeoutMs: number;
 }
 
 /** NT.PAYMENT API_Spec §5. PAYOS_BASE_URL do SDK tự đọc, không có ở đây */
@@ -126,6 +153,47 @@ export function payosConfig(env: NodeJS.ProcessEnv = process.env): PayosConfig {
   };
 }
 
+export function redisConfig(env: NodeJS.ProcessEnv = process.env): RedisConfig {
+  return {
+    host: env.REDIS_HOST ?? 'redis',
+    port: Number(env.REDIS_PORT ?? 6379),
+    password: env.REDIS_PASSWORD || undefined,
+    tls: env.REDIS_TLS === 'true',
+    db: Number(env.REDIS_DB ?? 1),
+    commandTimeoutMs: Number(env.REDIS_COMMAND_TIMEOUT_MS ?? 200),
+    connectTimeoutMs: Number(env.REDIS_CONNECT_TIMEOUT_MS ?? 1000),
+  };
+}
+
+export function dbLockConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): DbLockConfig {
+  return {
+    lockTimeoutMs: Number(env.DB_LOCK_TIMEOUT_MS ?? 1000),
+    idleTxTimeoutMs: Number(env.DB_IDLE_TX_TIMEOUT_MS ?? 15000),
+  };
+}
+
+// BR-20: tổng chờ để được ghi ≤ 3 s (NT.ORDER_HOLD API_Spec §3, §5). Sai thì dừng khởi động
+const MAX_WRITE_WAIT_MS = 3000;
+
+export function orderLockConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): OrderLockConfig {
+  const cfg = {
+    ttlMs: Number(env.ORDER_LOCK_TTL_MS ?? 10000),
+    waitMs: Number(env.ORDER_LOCK_WAIT_MS ?? 2000),
+    retryMs: Number(env.ORDER_LOCK_RETRY_MS ?? 50),
+  };
+  const total = cfg.waitMs + dbLockConfig(env).lockTimeoutMs;
+  if (total > MAX_WRITE_WAIT_MS) {
+    throw new Error(
+      `ORDER_LOCK_WAIT_MS + DB_LOCK_TIMEOUT_MS = ${total} ms, vượt ${MAX_WRITE_WAIT_MS} ms (BR-20)`,
+    );
+  }
+  return cfg;
+}
+
 export default (): OrderConfig => {
   assertRequiredEnv();
   return {
@@ -134,5 +202,8 @@ export default (): OrderConfig => {
     services: servicesConfig(),
     checkout: checkoutConfig(),
     payos: payosConfig(),
+    redis: redisConfig(),
+    orderLock: orderLockConfig(),
+    dbLock: dbLockConfig(),
   };
 };

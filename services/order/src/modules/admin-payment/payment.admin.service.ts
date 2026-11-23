@@ -5,7 +5,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment } from '../../database/entities/payment.entity';
-import { paymentNotFound } from '../../errors';
+import { lockBusyTo409, paymentNotFound } from '../../errors';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { PaymentLedgerService } from '../payment/payment-ledger.service';
 import { QueryAdminPaymentDto } from './payment.admin.dto';
@@ -75,7 +75,8 @@ export class AdminPaymentService {
 
   // POST /api/admin/payments/:id/confirm-cod
   async confirmCod(id: string) {
-    const saved = await this.paymentCore.confirmCod(id);
+    // Khoá đơn bận (BR-20) → 409 NT-ORD-1012
+    const saved = await this.paymentCore.confirmCod(id).catch(lockBusyTo409);
     return {
       id: saved.id,
       status: saved.status,

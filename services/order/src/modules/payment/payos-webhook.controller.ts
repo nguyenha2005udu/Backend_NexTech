@@ -17,7 +17,8 @@ import { BusinessException } from '@nextech/service-kit';
 import { PayOS, WebhookError, type Webhook } from '@payos/node';
 import { PAYOS_CLIENT } from '../../config/payos';
 import type { LedgerOutcome } from '../../database/entities/payment-transaction.entity';
-import { invalidWebhook, PAY_ERROR } from '../../errors';
+import { OrderLockBusyError } from '../../database/db-lock-error';
+import { invalidWebhook, lockBusyRetryLater, PAY_ERROR } from '../../errors';
 import { PaymentCoreService } from './payment-core.service';
 import {
   PaymentLedgerService,
@@ -91,6 +92,13 @@ export class PayosWebhookController {
         ledgerId,
       });
     } catch (err) {
+      // Khoá đơn bận (BR-20, T3.9): 503 để PayOS gửi lại; sổ giữ 'received'. Poll và job cũng xác nhận được
+      if (err instanceof OrderLockBusyError) {
+        this.logger.warn(
+          `Webhook PayOS: khoá đơn bận, trả 503: orderCode=${data.orderCode} ledger=${ledgerId}`,
+        );
+        throw lockBusyRetryLater();
+      }
       const code = swallowedCode(err);
       if (!code) throw err; // DB lỗi: sổ giữ 'received', PayOS gửi lại
       const outcome = SWALLOWED[code];

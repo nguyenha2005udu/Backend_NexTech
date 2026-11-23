@@ -3,9 +3,12 @@ import { Payment } from '../../database/entities/payment.entity';
 import {
   countQueries,
   createTestDb,
+  noLock,
   seedOrder,
   TestDb,
 } from '../../test-helpers';
+import { OrderLockBusyError } from '../../database/db-lock-error';
+import type { OrderLockService } from '../../redis/order-lock.service';
 import { RevenueService } from '../admin-revenue/revenue.admin.service';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { PaymentLedgerService } from '../payment/payment-ledger.service';
@@ -26,7 +29,7 @@ describe('AdminPaymentService + RevenueService (Postgres thật)', () => {
   beforeAll(async () => {
     db = await createTestDb();
     ledger = new PaymentLedgerService(db.ds);
-    const core = new PaymentCoreService(db.ds, ledger);
+    const core = new PaymentCoreService(db.ds, ledger, noLock);
     admin = new AdminPaymentService(db.ds.getRepository(Payment), core, ledger);
     revenue = new RevenueService(db.ds.getRepository(Payment));
   });
@@ -153,6 +156,27 @@ describe('AdminPaymentService + RevenueService (Postgres thật)', () => {
         code: 'NT-PAY-1001',
       });
     });
+  });
+
+  it('confirmCod khi khoá đơn bận → 409 NT-ORD-1012, giao dịch vẫn pending (BR-20)', async () => {
+    const busy = {
+      withOrderLock: (id: string) => Promise.reject(new OrderLockBusyError(id)),
+    } as unknown as OrderLockService;
+    const a = new AdminPaymentService(
+      db.ds.getRepository(Payment),
+      new PaymentCoreService(db.ds, ledger, busy),
+      ledger,
+    );
+    const s = await seedPayment({ method: 'cod', code: null });
+    await expect(a.confirmCod(s.paymentId)).rejects.toMatchObject({
+      status: 409,
+      code: 'NT-ORD-1012',
+    });
+    const [p] = await db.ds.query<Array<{ status: string }>>(
+      'SELECT status FROM payments WHERE id = $1',
+      [s.paymentId],
+    );
+    expect(p.status).toBe('pending');
   });
 
   it('confirmCod → { id, status: success, paid_at }, đơn paid', async () => {

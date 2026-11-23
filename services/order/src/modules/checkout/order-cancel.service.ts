@@ -6,14 +6,16 @@
 // qua catalog, promotion sau commit (không gọi HTTP khi giữ transaction). Lệnh lỗi thì ReconcileJob thử lại.
 // Dùng chung cho người mua và admin (NT.ORDER API_Spec route 11), hệ thống khi quá hạn (T3.10).
 // T3.6: giao dịch pending → failed (voidPendingByOrder) trong cùng transaction, như releaseOrderResources của be/.
-// Chưa có: withOrderLock (T3.9), HoldScheduleService.unschedule (T3.10), outbox order.cancelled (T4.1).
+// T3.9: cancelByUser bọc withOrderLock (BR-20), bận → 409 NT-ORD-1012. Chưa có: HoldScheduleService.unschedule
+// (T3.10), outbox order.cancelled (T4.1).
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 import type { CheckoutConfig } from '../../config/configuration';
 import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
-import { cannotCancel, orderNotFound } from '../../errors';
+import { cannotCancel, lockBusyTo409, orderNotFound } from '../../errors';
+import { OrderLockService } from '../../redis/order-lock.service';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { CompensationService, compensationTasks } from './compensation.service';
 
@@ -37,13 +39,23 @@ export class OrderCancelService {
     private readonly compensation: CompensationService,
     private readonly paymentCore: PaymentCoreService,
     config: ConfigService,
+    private readonly lock: OrderLockService,
   ) {
     this.budgetMs = config.getOrThrow<CheckoutConfig>('checkout').budgetMs;
   }
 
-  // PUT /api/orders/:id/cancel. Khoá Redis withOrderLock (BR-20) bọc thêm ở T3.9.
+  // PUT /api/orders/:id/cancel. Khoá đơn có thời hạn (BR-20) rồi mới mở transaction (NT.CHECKOUT_SAGA §7.1)
   async cancelByUser(userId: string, id: string): Promise<CancelResponse> {
-    const { result, tasks } = await this.ds.transaction(async (m) => {
+    const { result, tasks } = await this.lock
+      .withOrderLock(id, () => this.cancelByUserTx(userId, id))
+      .catch(lockBusyTo409);
+    // T3.10: HoldScheduleService.unschedule(id) sau commit
+    await this.releaseAfterCommit(id, tasks);
+    return result;
+  }
+
+  private cancelByUserTx(userId: string, id: string) {
+    return this.ds.transaction(async (m) => {
       // Khoá dòng đơn: 2 request huỷ song song không nhả 2 lần, webhook thanh toán phải đợi (như be/)
       const order = await m.findOne(Order, {
         where: { id, user_id: userId },
@@ -53,9 +65,6 @@ export class OrderCancelService {
       if (order.status !== 'pending') throw cannotCancel();
       return this.cancel(m, order, 'user');
     });
-    // T3.10: HoldScheduleService.unschedule(id) sau commit
-    await this.releaseAfterCommit(id, tasks);
-    return result;
   }
 
   /**

@@ -1,4 +1,5 @@
-import { BusinessException } from '@nextech/service-kit';
+import { BusinessException, GEN_ERROR } from '@nextech/service-kit';
+import { OrderLockBusyError } from './database/db-lock-error';
 
 // Catalog mã lỗi order — khớp NT.ORDER API_Spec §3. Thêm mã: sửa cả hai nơi trong cùng commit.
 export const ORD_ERROR = {
@@ -85,6 +86,28 @@ export const orderInProgress = () =>
     409,
     ORD_ERROR.ORDER_IN_PROGRESS,
     'Đơn hàng khác đang được xử lý, vui lòng đợi',
+  );
+
+// Khoá đơn bận (BR-20, NT.ORDER API_Spec §3, NT.ORDER_HOLD §3): Redis bận quá ORDER_LOCK_WAIT_MS hoặc Postgres 55P03
+export const orderLocked = () =>
+  new BusinessException(
+    409,
+    ORD_ERROR.ORDER_LOCKED,
+    'Đơn hàng đang được xử lý, vui lòng thử lại sau',
+  );
+
+/** Route người dùng/admin: OrderLockBusyError → 409 NT-ORD-1012; lỗi khác ném nguyên. Dùng trong .catch() */
+export const lockBusyTo409 = (err: unknown): never => {
+  if (err instanceof OrderLockBusyError) throw orderLocked();
+  throw err;
+};
+
+/** Webhook PayOS: khoá bận → 503 NT-GEN-0503 để PayOS gửi lại (NT.PAYMENT Component_Class_Design §2) */
+export const lockBusyRetryLater = () =>
+  new BusinessException(
+    503,
+    GEN_ERROR.UPSTREAM_UNAVAILABLE,
+    'Đơn hàng đang được xử lý, vui lòng thử lại sau',
   );
 
 // Huỷ đơn (NT.CHECKOUT_SAGA API_Spec §2, BR-06). Câu chữ giữ nguyên be/src/users/order/order.service.ts cancel

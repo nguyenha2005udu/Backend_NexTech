@@ -10,9 +10,12 @@ import { SagaTask } from '../../database/entities/saga-task.entity';
 import {
   countQueries,
   createTestDb,
+  noLock,
   seedOrder,
   TestDb,
 } from '../../test-helpers';
+import { OrderLockBusyError } from '../../database/db-lock-error';
+import type { OrderLockService } from '../../redis/order-lock.service';
 import { CompensationService } from '../checkout/compensation.service';
 import { OrderCancelService } from '../checkout/order-cancel.service';
 import { PaymentCoreService } from './payment-core.service';
@@ -38,7 +41,7 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
   beforeAll(async () => {
     db = await createTestDb();
     ledger = new PaymentLedgerService(db.ds);
-    core = new PaymentCoreService(db.ds, ledger);
+    core = new PaymentCoreService(db.ds, ledger, noLock);
     const compensation = new CompensationService(
       db.ds.getRepository(Order),
       db.ds.getRepository(SagaTask),
@@ -46,9 +49,13 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
       catalog as unknown as CatalogClient,
       promotion as unknown as PromotionClient,
     );
-    cancel = new OrderCancelService(db.ds, compensation, core, {
-      getOrThrow: () => ({ budgetMs: 8000 }),
-    } as unknown as ConfigService);
+    cancel = new OrderCancelService(
+      db.ds,
+      compensation,
+      core,
+      { getOrThrow: () => ({ budgetMs: 8000 }) } as unknown as ConfigService,
+      noLock,
+    );
   });
   afterAll(async () => db?.cleanup());
   beforeEach(async () => {
@@ -378,6 +385,59 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
       });
       await db.ds.transaction((m) => core.voidPendingByOrder(m, b.orderId));
       expect((await payment(b.paymentId)).status).toBe('success');
+    });
+  });
+
+  describe('khoá đơn (T3.9, BR-20)', () => {
+    const lockOf = (busy = false) => ({
+      withOrderLock: jest.fn((_id: string, fn: () => Promise<unknown>) =>
+        busy ? Promise.reject(new OrderLockBusyError(_id)) : fn(),
+      ),
+    });
+
+    it('markSuccess, confirmCod khoá theo order_id; markSuccess truyền waitMs của bên gọi', async () => {
+      const lock = lockOf();
+      const c = new PaymentCoreService(
+        db.ds,
+        ledger,
+        lock as unknown as OrderLockService,
+      );
+      const cod = await seed({ method: 'cod', code: null });
+      await c.confirmCod(cod.paymentId);
+      expect(lock.withOrderLock).toHaveBeenLastCalledWith(
+        cod.orderId,
+        expect.any(Function),
+      );
+      const p = await seed({ code: '222' });
+      await c.markSuccess(
+        { paymentId: p.paymentId, paidAmount: 230000 },
+        { waitMs: 0 },
+      );
+      expect(lock.withOrderLock).toHaveBeenLastCalledWith(
+        p.orderId,
+        expect.any(Function),
+        { waitMs: 0 },
+      );
+      expect(await orderStatus(p.orderId)).toBe('paid');
+    });
+
+    it('khoá bận → OrderLockBusyError nguyên cho bên gọi đổi; giao dịch, đơn không đổi', async () => {
+      const c = new PaymentCoreService(
+        db.ds,
+        ledger,
+        lockOf(true) as unknown as OrderLockService,
+      );
+      const p = await seed({ code: '333' });
+      await expect(
+        c.markSuccess({ paymentId: p.paymentId, paidAmount: 230000 }),
+      ).rejects.toBeInstanceOf(OrderLockBusyError);
+      const cod = await seed({ method: 'cod', code: null });
+      await expect(c.confirmCod(cod.paymentId)).rejects.toBeInstanceOf(
+        OrderLockBusyError,
+      );
+      expect((await payment(p.paymentId)).status).toBe('pending');
+      expect((await payment(cod.paymentId)).status).toBe('pending');
+      expect(await orderStatus(p.orderId)).toBe('pending');
     });
   });
 

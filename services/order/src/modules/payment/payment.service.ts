@@ -117,7 +117,7 @@ export class PaymentService {
     if (payment.order.user_id !== userId) throw paymentForbidden();
 
     // Webhook PayOS không gọi được vào localhost, nên khi giao dịch payos còn 'pending' ta CHỦ ĐỘNG hỏi PayOS
-    // trạng thái thật rồi đồng bộ vào DB (be/). T3.9: markSuccess không chờ khoá đơn (waitMs 0).
+    // trạng thái thật rồi đồng bộ vào DB (be/). Không chờ khoá đơn (waitMs 0, T3.9): bận thì rơi vào catch dưới, trả trạng thái đang lưu.
     if (
       payment.method === 'payos' &&
       payment.status === 'pending' &&
@@ -129,11 +129,14 @@ export class PaymentService {
         );
         const response = info as unknown as Record<string, unknown>;
         if (info.status === 'PAID') {
-          const r = await this.paymentCore.markSuccess({
-            found: { id: payment.id, order_id: payment.order_id },
-            gatewayResponse: response,
-            paidAmount: info.amountPaid,
-          });
+          const r = await this.paymentCore.markSuccess(
+            {
+              found: { id: payment.id, order_id: payment.order_id },
+              gatewayResponse: response,
+              paidAmount: info.amountPaid,
+            },
+            { waitMs: 0 },
+          );
           payment.status = r.status;
           payment.paid_at = r.paid_at;
         } else if (DEAD_LINK.includes(info.status)) {

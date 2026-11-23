@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { PostgresQueryRunner } from 'typeorm/driver/postgres/PostgresQueryRunner';
 import { dataSourceOptions } from './database/typeorm-options';
+import type { OrderLockService } from './redis/order-lock.service';
 
 // Dựng Postgres thật cho *.int-spec.ts (tdd-guide §5: test đồng thời không dùng mock).
 // Cần `docker compose up -d postgres` (cổng 5433 trên máy). Mỗi lần chạy một schema riêng qua
@@ -42,7 +43,10 @@ async function withAdmin<T>(
   }
 }
 
-export async function createTestDb(): Promise<TestDb> {
+/** `pgOptions`: tham số kết nối thêm (vd. lock_timeout của appConnectionExtra) cho test khoá */
+export async function createTestDb(
+  opts: { pgOptions?: string } = {},
+): Promise<TestDb> {
   const base = dataSourceOptions(TEST_ENV);
   const schema = `test_${process.pid}_${Date.now()}`;
   await withAdmin(base, (a) => a.query(`CREATE SCHEMA "${schema}"`));
@@ -50,7 +54,10 @@ export async function createTestDb(): Promise<TestDb> {
   const ds = await new DataSource({
     ...base,
     // public để thấy uuid_generate_v4() của extension uuid-ossp (infra/postgres/init-databases.sh)
-    extra: { options: `-c search_path=${schema},public`, max: 20 },
+    extra: {
+      options: `-c search_path=${schema},public ${opts.pgOptions ?? ''}`.trim(),
+      max: 20,
+    },
     migrationsRun: true,
   }).initialize();
 
@@ -133,3 +140,8 @@ export async function seedOrder(
   }
   return id;
 }
+
+// Khoá đơn chạy thẳng fn (không Redis) cho int-spec không kiểm khoá; khoá thật ở redis/order-lock.service.int-spec.ts
+export const noLock = {
+  withOrderLock: <T>(_orderId: string, fn: () => Promise<T>) => fn(),
+} as unknown as OrderLockService;

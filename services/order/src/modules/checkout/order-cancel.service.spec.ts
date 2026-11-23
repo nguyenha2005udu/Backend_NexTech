@@ -2,6 +2,8 @@ import type { ConfigService } from '@nestjs/config';
 import type { DataSource, EntityManager } from 'typeorm';
 import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
+import { OrderLockBusyError } from '../../database/db-lock-error';
+import type { OrderLockService } from '../../redis/order-lock.service';
 import type { PaymentCoreService } from '../payment/payment-core.service';
 import type { CompensationService } from './compensation.service';
 import { OrderCancelService } from './order-cancel.service';
@@ -29,6 +31,8 @@ describe('OrderCancelService', () => {
   };
   const compensation = { run: jest.fn() };
   const paymentCore = { voidPendingByOrder: jest.fn() };
+  // Khoá đơn (T3.9, BR-20): mặc định chạy thẳng fn; từng ca đổi sang bận
+  const lock = { withOrderLock: jest.fn() };
   const svc = new OrderCancelService(
     ds as unknown as DataSource,
     compensation as unknown as CompensationService,
@@ -36,6 +40,7 @@ describe('OrderCancelService', () => {
     {
       getOrThrow: () => ({ budgetMs: 8000 }),
     } as unknown as ConfigService,
+    lock as unknown as OrderLockService,
   );
 
   const UPDATED_AT = new Date('2026-11-21T10:00:00Z');
@@ -62,9 +67,35 @@ describe('OrderCancelService', () => {
       }),
     );
     compensation.run.mockResolvedValue(undefined);
+    lock.withOrderLock.mockImplementation(
+      (_id: string, fn: () => Promise<unknown>) => fn(),
+    );
   });
 
   describe('cancelByUser', () => {
+    it('bọc withOrderLock theo id đơn, chờ mặc định (BR-20)', async () => {
+      m.findOne.mockResolvedValue(order());
+      await svc.cancelByUser('u1', 'o1');
+      expect(lock.withOrderLock).toHaveBeenCalledWith(
+        'o1',
+        expect.any(Function),
+      );
+    });
+
+    it('khoá đơn bận → 409 NT-ORD-1012, không mở transaction, không nhả (NT.CHECKOUT_SAGA #28)', async () => {
+      lock.withOrderLock.mockRejectedValue(new OrderLockBusyError('o1'));
+      const err = (await svc
+        .cancelByUser('u1', 'o1')
+        .catch((e: unknown) => e)) as {
+        code?: string;
+        getStatus?: () => number;
+      };
+      expect(err.code).toBe('NT-ORD-1012');
+      expect(err.getStatus?.()).toBe(409);
+      expect(ds.transaction).not.toHaveBeenCalled();
+      expect(compensation.run).not.toHaveBeenCalled();
+    });
+
     it('khoá dòng đơn của đúng người gọi (FOR UPDATE, như be/)', async () => {
       m.findOne.mockResolvedValue(order());
       await svc.cancelByUser('u1', 'o1');

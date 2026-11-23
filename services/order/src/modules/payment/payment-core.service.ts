@@ -1,10 +1,10 @@
 // Chép từ be/src/users/payment/payment-core.service.ts. Đổi theo NT.PAYMENT Component_Class_Design §4, §4.1 (v2.7):
 // - markSuccess: tìm giao dịch (findForWebhook, tra cả mã cũ previous_transaction_ids) NGOÀI transaction để biết
-//   order_id (T3.9 bọc withOrderLock); trong transaction khoá đơn rồi khoá giao dịch như be/; ghi bằng UPDATE thay
+//   order_id rồi bọc withOrderLock(order_id) (T3.9, BR-20; khoá bận → OrderLockBusyError, bên gọi đổi); trong transaction khoá đơn rồi khoá giao dịch như be/; ghi bằng UPDATE thay
 //   save (bớt câu đọc lại). Thêm BR-10: trả hai link → needs_refund; tiền về khi đơn huỷ/failed → needs_refund.
 //   Chốt sổ tiền về cùng transaction (ledgerId). T4.1: outbox order.paid. T3.10: unschedule sau commit.
 // - markFailed: một UPDATE … WHERE status='pending' (B15) thay đọc rồi save: không ghi failed đè success.
-// - confirmCod: khoá đơn rồi giao dịch như markSuccess (be/ không khoá đơn); đổi đơn paid như be/.
+// - confirmCod: withOrderLock (T3.9), khoá đơn rồi giao dịch như markSuccess (be/ không khoá đơn); đổi đơn paid như be/.
 // - confirmCodForOrder → confirmCodByOrder(manager, orderId); thêm voidPendingByOrder (từ releaseOrderResources
 //   của be/ dòng 77–79), sumRevenue (từ getOverview của be/ admin/statistics, dòng 45–51).
 import { Injectable, Logger } from '@nestjs/common';
@@ -19,6 +19,10 @@ import {
   invalidPaymentState,
   paymentNotFound,
 } from '../../errors';
+import {
+  OrderLockService,
+  type OrderLockOptions,
+} from '../../redis/order-lock.service';
 import { PaymentLedgerService } from './payment-ledger.service';
 
 /** id và order_id của giao dịch — đủ để khoá đơn trước */
@@ -48,6 +52,7 @@ export class PaymentCoreService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly ledger: PaymentLedgerService,
+    private readonly lock: OrderLockService,
   ) {}
 
   /** Tìm giao dịch theo mã PayOS hiện hành hoặc mã cũ (index GIN ix_payments_prev_codes) */
@@ -65,7 +70,11 @@ export class PaymentCoreService {
     return found ? { id: found.id, order_id: found.order_id } : null;
   }
 
-  async markSuccess(params: MarkSuccessParams): Promise<Payment> {
+  /** opts.waitMs: webhook mặc định; poll, job truyền 0 (NT.PAYMENT Component_Class_Design §4 v2.3) */
+  async markSuccess(
+    params: MarkSuccessParams,
+    opts: OrderLockOptions = {},
+  ): Promise<Payment> {
     const found =
       params.found ??
       (params.paymentId
@@ -75,6 +84,17 @@ export class PaymentCoreService {
           : null);
     if (!found) throw paymentNotFound();
 
+    return this.lock.withOrderLock(
+      found.order_id,
+      () => this.markSuccessTx(found, params),
+      opts,
+    );
+  }
+
+  private markSuccessTx(
+    found: PaymentRef,
+    params: MarkSuccessParams,
+  ): Promise<Payment> {
     return this.dataSource.transaction(async (m) => {
       // Khoá đơn trước rồi mới khoá giao dịch (cùng thứ tự với huỷ đơn, không deadlock). Webhook và poll có thể
       // chạy đồng thời → chỉ một bên xử lý.
@@ -203,6 +223,12 @@ export class PaymentCoreService {
     const found = await this.refById(paymentId);
     if (!found) throw paymentNotFound();
 
+    return this.lock.withOrderLock(found.order_id, () =>
+      this.confirmCodTx(found),
+    );
+  }
+
+  private confirmCodTx(found: PaymentRef): Promise<Payment> {
     return this.dataSource.transaction(async (m) => {
       await m.findOne(Order, {
         where: { id: found.order_id },
