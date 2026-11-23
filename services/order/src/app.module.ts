@@ -8,6 +8,7 @@ import { dataSourceOptions } from './database/typeorm-options';
 import { InternalModule } from './internal/internal.module';
 import { AdminPaymentModule } from './modules/admin-payment/payment.admin.module';
 import { AdminRevenueModule } from './modules/admin-revenue/revenue.admin.module';
+import { AdminStatisticsModule } from './modules/admin-statistics/statistics.admin.module';
 import { AdminOrderModule } from './modules/admin-order/order.admin.module';
 import { CartModule } from './modules/cart/cart.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
@@ -15,7 +16,7 @@ import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
 
 // Khung T1.6: khởi động, kết nối database, /health. T3.1: giỏ hàng. T3.2: xem đơn, admin đơn,
-// /internal/purchases. T3.3: checkout (saga). T3.5: cron đối soát, huỷ đơn. T3.6: thanh toán. Module khác thêm ở task sau
+// /internal/purchases. T3.3: checkout (saga). T3.5: cron đối soát, huỷ đơn. T3.6: thanh toán. T3.7: thống kê tổng quan. Module khác thêm ở task sau
 // (implementation/PHASE-3.md).
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { PaymentModule } from './modules/payment/payment.module';
     PaymentModule,
     AdminPaymentModule,
     AdminRevenueModule,
+    AdminStatisticsModule,
     InternalModule,
   ],
 })
