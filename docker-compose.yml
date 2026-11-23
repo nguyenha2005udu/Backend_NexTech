@@ -223,6 +223,8 @@ services:
     build: { context: ., dockerfile: services/order/Dockerfile }
     depends_on:
       postgres: { condition: service_healthy }
+      # Chỉ chờ container khởi động, không chờ healthy: Redis chết thì order vẫn chạy, khoá đơn fail-open (ADR-0015)
+      redis: { condition: service_started }
     environment:
       <<: *common-env
       PORT: 3004
@@ -256,6 +258,22 @@ services:
       PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:3000/payment/success}
       PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:3000/payment/cancel}
       PAYOS_TIMEOUT_MS: ${PAYOS_TIMEOUT_MS:-5000}
+      # Redis + khoá đơn có thời hạn (T3.9 — NT.ORDER_HOLD API_Spec §5, BR-20). Dùng chung container với identity,
+      # DB 1 ghi cứng để không đụng key của identity (DB 0). .env đặt REDIS_HOST=localhost cho npm run dev thì
+      # docker compose up phải ghi đè REDIS_HOST=redis (gotchas.md).
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_TLS: ${REDIS_TLS:-false}
+      REDIS_DB: 1
+      REDIS_COMMAND_TIMEOUT_MS: ${REDIS_COMMAND_TIMEOUT_MS:-200}
+      REDIS_CONNECT_TIMEOUT_MS: ${REDIS_CONNECT_TIMEOUT_MS:-1000}
+      ORDER_LOCK_TTL_MS: ${ORDER_LOCK_TTL_MS:-10000}
+      ORDER_LOCK_WAIT_MS: ${ORDER_LOCK_WAIT_MS:-2000}
+      ORDER_LOCK_RETRY_MS: ${ORDER_LOCK_RETRY_MS:-50}
+      # lock_timeout, idle_in_transaction_session_timeout của kết nối ứng dụng (BR-20: WAIT + LOCK_TIMEOUT ≤ 3000)
+      DB_LOCK_TIMEOUT_MS: ${DB_LOCK_TIMEOUT_MS:-1000}
+      DB_IDLE_TX_TIMEOUT_MS: ${DB_IDLE_TX_TIMEOUT_MS:-15000}
     healthcheck: *node-health
 
   notification-service:

@@ -2,6 +2,9 @@ import {
   DB_REQUIRED,
   assertRequiredEnv,
   checkoutConfig,
+  dbLockConfig,
+  orderLockConfig,
+  redisConfig,
   payosConfig,
   databaseConfig,
   servicesConfig,
@@ -149,5 +152,74 @@ describe('payosConfig', () => {
       cancelUrl: 'x',
       timeoutMs: 1500,
     });
+  });
+});
+
+// NT.ORDER_HOLD API_Spec §5 (T3.9): Redis DB 1, client trả lỗi nhanh, khoá đơn có thời hạn
+describe('redisConfig', () => {
+  it('mặc định dev: redis:6379, DB 1, timeout 200/1000', () => {
+    expect(redisConfig({})).toEqual({
+      host: 'redis',
+      port: 6379,
+      password: undefined,
+      tls: false,
+      db: 1,
+      commandTimeoutMs: 200,
+      connectTimeoutMs: 1000,
+    });
+  });
+
+  it('đọc biến; password rỗng coi như không có', () => {
+    expect(
+      redisConfig({
+        REDIS_HOST: 'h',
+        REDIS_PORT: '6380',
+        REDIS_PASSWORD: '',
+        REDIS_TLS: 'true',
+        REDIS_DB: '2',
+        REDIS_COMMAND_TIMEOUT_MS: '150',
+        REDIS_CONNECT_TIMEOUT_MS: '500',
+      }),
+    ).toEqual({
+      host: 'h',
+      port: 6380,
+      password: undefined,
+      tls: true,
+      db: 2,
+      commandTimeoutMs: 150,
+      connectTimeoutMs: 500,
+    });
+  });
+});
+
+describe('orderLockConfig, dbLockConfig', () => {
+  it('mặc định: lease 10 s, chờ 2 s, thử lại 50 ms; lock_timeout 1 s, idle 15 s', () => {
+    expect(orderLockConfig({})).toEqual({
+      ttlMs: 10000,
+      waitMs: 2000,
+      retryMs: 50,
+    });
+    expect(dbLockConfig({})).toEqual({
+      lockTimeoutMs: 1000,
+      idleTxTimeoutMs: 15000,
+    });
+  });
+
+  it('ORDER_LOCK_WAIT_MS + DB_LOCK_TIMEOUT_MS = 3000 được (BR-20)', () => {
+    expect(() =>
+      orderLockConfig({
+        ORDER_LOCK_WAIT_MS: '2500',
+        DB_LOCK_TIMEOUT_MS: '500',
+      }),
+    ).not.toThrow();
+  });
+
+  it('tổng chờ > 3000 → dừng khởi động, nêu tên biến (BR-20)', () => {
+    expect(() =>
+      orderLockConfig({
+        ORDER_LOCK_WAIT_MS: '2500',
+        DB_LOCK_TIMEOUT_MS: '1000',
+      }),
+    ).toThrow(/ORDER_LOCK_WAIT_MS \+ DB_LOCK_TIMEOUT_MS/);
   });
 });

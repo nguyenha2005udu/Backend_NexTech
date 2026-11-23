@@ -2,9 +2,16 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { HealthModule, typeOrmHealthCheck } from '@nextech/service-kit';
+import {
+  HealthModule,
+  redisHealthCheck,
+  typeOrmHealthCheck,
+} from '@nextech/service-kit';
 import configuration from './config/configuration';
-import { dataSourceOptions } from './database/typeorm-options';
+import {
+  appConnectionExtra,
+  dataSourceOptions,
+} from './database/typeorm-options';
 import { InternalModule } from './internal/internal.module';
 import { AdminPaymentModule } from './modules/admin-payment/payment.admin.module';
 import { AdminRevenueModule } from './modules/admin-revenue/revenue.admin.module';
@@ -14,9 +21,10 @@ import { CartModule } from './modules/cart/cart.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { ORDER_REDIS, RedisModule } from './redis/redis.module';
 
 // Khung T1.6: khởi động, kết nối database, /health. T3.1: giỏ hàng. T3.2: xem đơn, admin đơn,
-// /internal/purchases. T3.3: checkout (saga). T3.5: cron đối soát, huỷ đơn. T3.6: thanh toán. T3.7: thống kê tổng quan. Module khác thêm ở task sau
+// /internal/purchases. T3.3: checkout (saga). T3.5: cron đối soát, huỷ đơn. T3.6: thanh toán. T3.7: thống kê tổng quan. T3.9: Redis, khoá đơn. Module khác thêm ở task sau
 // (implementation/PHASE-3.md).
 @Module({
   imports: [
@@ -25,11 +33,22 @@ import { PaymentModule } from './modules/payment/payment.module';
     ScheduleModule.forRoot(),
     // Chạy migration khi khởi động, không synchronize (coding-convention §5)
     TypeOrmModule.forRootAsync({
-      useFactory: () => ({ ...dataSourceOptions(), migrationsRun: true }),
+      // extra: lock_timeout, idle_in_transaction_session_timeout chỉ cho kết nối ứng dụng (BR-20, T3.9)
+      useFactory: () => ({
+        ...dataSourceOptions(),
+        extra: appConnectionExtra(),
+        migrationsRun: true,
+      }),
     }),
+    // Client Redis lỗi nhanh + OrderLockService (T3.9, NT.ORDER_HOLD §1, §2)
+    RedisModule,
+    // Redis chỉ báo trạng thái, không làm /health 503: khoá đơn fail-open khi Redis lỗi (ADR-0015)
     HealthModule.forRoot({
       service: 'order',
-      checks: [typeOrmHealthCheck()],
+      checks: [
+        typeOrmHealthCheck(),
+        { ...redisHealthCheck(ORDER_REDIS), required: false },
+      ],
     }),
     CartModule,
     OrderModule,
