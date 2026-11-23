@@ -112,7 +112,8 @@ describe('OrderCancelService (Postgres thật)', () => {
     expect(await tasksOf(id)).toEqual([
       expect.objectContaining({ type: 'release_stock', status: 'done' }),
     ]);
-    expect(n).toBe(5);
+    // T4.1: + outbox order.cancelled trong transaction huỷ
+    expect(n).toBe(6);
   });
 
   it('có mã → nhả mã rồi nhả kho, cả hai done', async () => {
@@ -150,7 +151,8 @@ describe('OrderCancelService (Postgres thật)', () => {
       attempts: 1,
       last_error: 'catalog ECONNREFUSED (not_executed)',
     });
-    expect(n).toBe(5);
+    // T4.1: + outbox order.cancelled
+    expect(n).toBe(6);
 
     await compensation.run(id); // như ReconcileJob bước 2
 
@@ -172,7 +174,8 @@ describe('OrderCancelService (Postgres thật)', () => {
       'done',
       'pending',
     ]);
-    expect(n).toBe(6);
+    // T4.1: + outbox order.cancelled
+    expect(n).toBe(7);
   });
 
   it('test 18: huỷ hai lần nối tiếp → lần hai 400 NT-ORD-1008, nhả một lần', async () => {

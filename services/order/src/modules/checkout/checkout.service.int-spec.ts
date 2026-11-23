@@ -1,11 +1,16 @@
 import type { HttpException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import { UpstreamBusinessError, UpstreamError } from '@nextech/service-kit';
+import {
+  UpstreamBusinessError,
+  UpstreamError,
+  type EventEnvelope,
+} from '@nextech/service-kit';
 import { randomUUID } from 'node:crypto';
 import { EntityManager } from 'typeorm';
 import type { CatalogClient } from '../../clients/catalog.client';
 import type { IdentityClient } from '../../clients/identity.client';
 import type { PromotionClient } from '../../clients/promotion.client';
+import { orderEvents } from '../../outbox/order-events';
 import { Cart } from '../../database/entities/cart.entity';
 import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
@@ -138,6 +143,21 @@ describe('CheckoutService (Postgres thật)', () => {
       where: { user_id: userId },
       relations: { items: true },
     });
+  // Sự kiện trong outbox của một đơn (T4.1)
+  const eventsOf = async (orderId: string) =>
+    (
+      await db.ds.query<
+        Array<{ payload: EventEnvelope; published_at: Date | null }>
+      >(
+        `SELECT payload, published_at FROM outbox
+         WHERE payload->'data'->>'order_id' = $1 ORDER BY created_at`,
+        [orderId],
+      )
+    ).map((r) => ({
+      type: r.payload.type,
+      data: r.payload.data,
+      published: r.published_at !== null,
+    }));
   const cartItemIds = async (userId: string) =>
     (
       await db.ds.query<Array<{ id: string }>>(
@@ -145,6 +165,21 @@ describe('CheckoutService (Postgres thật)', () => {
         [userId],
       )
     ).map((r) => r.id);
+
+  it('T4.1: transaction rollback → không còn dòng outbox (NT.MESSAGING Component_Class_Design §5)', async () => {
+    const id = randomUUID();
+    await expect(
+      db.ds.transaction(async (m) => {
+        await orderEvents.created(m, {
+          id,
+          user_id: randomUUID(),
+          total: '1000',
+        });
+        throw new Error('rollback');
+      }),
+    ).rejects.toThrow('rollback');
+    expect(await eventsOf(id)).toEqual([]);
+  });
 
   it('test 1: có mã → 201, pending/confirmed, tiền đúng (BR-04, BR-05), xoá dòng giỏ, 10 truy vấn', async () => {
     const u = randomUUID();
@@ -198,6 +233,14 @@ describe('CheckoutService (Postgres thật)', () => {
       customer_name: 'Nguyễn Văn A',
       idempotency_key: 'key-1',
     });
+    // T4.1: đúng một sự kiện order.created, cùng commit với đơn (NT.MESSAGING API_Spec §3)
+    expect(await eventsOf(o.id)).toEqual([
+      {
+        type: 'order.created',
+        data: { order_id: o.id, user_id: u, total: 345000 },
+        published: false,
+      },
+    ]);
     expect(o.items).toHaveLength(2);
     expect(o.items.find((i) => i.product_id === P1)).toMatchObject({
       product_name: 'Tai nghe',
@@ -206,8 +249,9 @@ describe('CheckoutService (Postgres thật)', () => {
     });
     expect(await cartItemIds(u)).toEqual([]);
     // Processing_Flow §1 v1.5: key 1 + giỏ 1 + tạo đơn 2 + 2 setStep + confirm 2 (UPDATE, DELETE) = 8
+    // T4.1: + outbox order.created trong transaction confirm = 9
     expect(n).toBeLessThanOrEqual(10);
-    expect(n).toBe(8);
+    expect(n).toBe(9);
   });
 
   it('test 2: không mã → không gọi promotion, total = subtotal + ship; từ 500.000đ miễn ship', async () => {
@@ -228,8 +272,8 @@ describe('CheckoutService (Postgres thật)', () => {
       shipping_fee: 0,
       total: 550000,
     });
-    // giỏ 1 + tạo đơn 2 + setStep 1 + confirm 2 = 6
-    expect(n).toBe(6);
+    // giỏ 1 + tạo đơn 2 + setStep 1 + confirm 2 + outbox order.created 1 (T4.1) = 7
+    expect(n).toBe(7);
   });
 
   it('test 3: đặt một phần giỏ → dòng không chọn còn lại', async () => {
@@ -429,6 +473,10 @@ describe('CheckoutService (Postgres thật)', () => {
       expect(promotion.redeem).not.toHaveBeenCalled();
       expect(catalog.release).toHaveBeenCalledTimes(1);
       const [o] = await ordersOf(u);
+      // T4.1: không có order.created; có order.failed kèm lý do
+      expect((await eventsOf(o.id)).map((e) => e.type)).toEqual([
+        'order.failed',
+      ]);
       expect(o).toMatchObject({
         status: 'failed',
         saga_step: 'compensated',
@@ -440,7 +488,8 @@ describe('CheckoutService (Postgres thật)', () => {
       ]);
       expect(await cartItemIds(u)).toEqual(lines);
       // giỏ 1 + tạo đơn 2 + start 2 + run (SELECT + done) 2 + finish 1
-      expect(n).toBe(8);
+      // T4.1: finish + đọc user_id, lý do + outbox order.failed = 10
+      expect(n).toBe(10);
     });
 
     it('giữ kho 409 khi có mã → vẫn nhả cả mã (tombstone) dù chưa dùng mã', async () => {
@@ -499,7 +548,8 @@ describe('CheckoutService (Postgres thật)', () => {
         idempotency_key: 'k5',
       });
       // key 1 + giỏ 1 + tạo đơn 2 + setStep 1 + start 2 + run 2 + finish 1
-      expect(n).toBe(10);
+      // T4.1: + đọc user_id, lý do + outbox order.failed = 12
+      expect(n).toBe(12);
     });
 
     it('test 6 + 23: giữ kho not_executed → 503, failed; nhả key → gửi lại cùng key tạo đơn mới', async () => {

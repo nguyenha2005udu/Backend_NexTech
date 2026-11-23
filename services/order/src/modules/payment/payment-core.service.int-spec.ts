@@ -179,7 +179,8 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
       expect(rows[0].raw_payload).toMatchObject({ orderCode: 111 });
       expect(rows[0].processed_at).toBeInstanceOf(Date);
       // sổ 1 + tìm 1 + khoá đơn 1 + khoá giao dịch 1 + UPDATE payments 1 + UPDATE orders 1 + chốt sổ 1
-      expect(n).toBe(7);
+      // T4.1: + outbox order.paid = 8
+      expect(n).toBe(8);
     });
 
     it('trả qua link cũ (mã trong previous_transaction_ids) → ghi nhận đúng giao dịch', async () => {

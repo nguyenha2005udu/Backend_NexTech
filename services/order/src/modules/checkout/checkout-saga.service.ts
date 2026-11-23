@@ -16,6 +16,7 @@ import {
 } from '../../clients/promotion.client';
 import { CartItem } from '../../database/entities/cart-item.entity';
 import { Order } from '../../database/entities/order.entity';
+import { orderEvents } from '../../outbox/order-events';
 import { HoldScheduleService } from '../order-hold/hold-schedule.service';
 import { CompensationService } from './compensation.service';
 import { totalOf } from './order-pricing';
@@ -190,13 +191,14 @@ export class CheckoutSagaService {
 
       const selected = order.selected_cart_item_ids ?? [];
       if (selected.length) await m.delete(CartItem, { id: In(selected) });
-      // outbox order.created: T4.1 (NT.MESSAGING)
       const confirmed: Order = {
         ...order,
         status: 'pending',
         saga_step: 'confirmed',
         payment_expires_at: expiresAt,
       };
+      // T4.1: order.created cùng transaction với processing → pending (NT.MESSAGING)
+      await orderEvents.created(m, confirmed);
       return { won: true, order: confirmed };
     });
     // Sau commit, chỉ bên thắng. Redis lỗi: log warn, HoldExpiryJob quét DB bù (NT.ORDER_HOLD Processing_Flow §6)

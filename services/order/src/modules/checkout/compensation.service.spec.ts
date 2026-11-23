@@ -1,4 +1,8 @@
-import { UpstreamBusinessError, UpstreamError } from '@nextech/service-kit';
+import {
+  OutboxEvent,
+  UpstreamBusinessError,
+  UpstreamError,
+} from '@nextech/service-kit';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { In, Not } from 'typeorm';
 import type { CatalogClient } from '../../clients/catalog.client';
@@ -13,7 +17,13 @@ import { CompensationService } from './compensation.service';
 describe('CompensationService', () => {
   const orders = { update: jest.fn() };
   const tasks = { find: jest.fn(), update: jest.fn() };
-  const m = { update: jest.fn(), insert: jest.fn() };
+  const m = {
+    update: jest.fn(),
+    insert: jest.fn(),
+    findOne: jest.fn(),
+    // finish chạy UPDATE qua repo orders gắn vào transaction (T4.1)
+    withRepository: () => orders,
+  };
   const dataSource = {
     transaction: jest.fn((cb: (em: EntityManager) => Promise<unknown>) =>
       cb(m as unknown as EntityManager),
@@ -60,6 +70,11 @@ describe('CompensationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     m.update.mockResolvedValue({ affected: 1 });
+    m.findOne.mockResolvedValue({
+      id: 'o1',
+      user_id: 'u1',
+      failure_message: 'Hết hàng',
+    });
     orders.update.mockResolvedValue({ affected: 1 });
     tasks.update.mockResolvedValue({ affected: 1 });
     tasks.find.mockResolvedValue([]);
@@ -165,6 +180,16 @@ describe('CompensationService', () => {
       expect(orders.update).toHaveBeenCalledWith(
         { id: 'o1', status: 'processing', saga_step: 'compensating' },
         { status: 'failed', saga_step: 'compensated' },
+      );
+      // T4.1: order.failed cùng transaction với UPDATE
+      expect(m.insert).toHaveBeenCalledWith(
+        OutboxEvent,
+        expect.objectContaining({
+          routing_key: 'order.failed',
+          payload: expect.objectContaining({
+            data: { order_id: 'o1', user_id: 'u1', reason: 'Hết hàng' },
+          }) as unknown,
+        }),
       );
     });
 

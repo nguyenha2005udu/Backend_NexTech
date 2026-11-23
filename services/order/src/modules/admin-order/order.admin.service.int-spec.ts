@@ -231,7 +231,8 @@ describe('AdminOrderService (Postgres thật)', () => {
         );
         expect(p.status).toBe('success'); // hoàn tiền tay (be/)
       }
-      expect(n).toBe(5);
+      // T4.1: + outbox order.cancelled
+      expect(n).toBe(6);
     },
   );
 

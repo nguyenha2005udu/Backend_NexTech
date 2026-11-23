@@ -4,9 +4,12 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   HealthModule,
+  OutboxPublisher,
+  rabbitHealthCheck,
   redisHealthCheck,
   typeOrmHealthCheck,
 } from '@nextech/service-kit';
+import { OutboxModule } from './outbox/outbox.module';
 import configuration from './config/configuration';
 import {
   appConnectionExtra,
@@ -49,8 +52,12 @@ import { ORDER_REDIS, RedisModule } from './redis/redis.module';
       checks: [
         typeOrmHealthCheck(),
         { ...redisHealthCheck(ORDER_REDIS), required: false },
+        // RabbitMQ chết không làm /health 503: sự kiện chờ trong outbox (T4.1)
+        rabbitHealthCheck(OutboxPublisher),
       ],
     }),
+    // Gửi order.* từ outbox sang RabbitMQ (T4.1)
+    OutboxModule,
     CartModule,
     OrderModule,
     CheckoutModule,

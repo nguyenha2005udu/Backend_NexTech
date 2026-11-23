@@ -1,4 +1,8 @@
-import { UpstreamBusinessError, UpstreamError } from '@nextech/service-kit';
+import {
+  OutboxEvent,
+  UpstreamBusinessError,
+  UpstreamError,
+} from '@nextech/service-kit';
 import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { In, Not } from 'typeorm';
 import type { CatalogClient } from '../../clients/catalog.client';
@@ -20,6 +24,7 @@ describe('CheckoutSagaService.advance', () => {
     update: jest.fn(),
     delete: jest.fn(),
     findOneByOrFail: jest.fn(),
+    insert: jest.fn(), // outbox order.created (T4.1)
   };
   const dataSource = {
     transaction: jest.fn((cb: (em: EntityManager) => Promise<unknown>) =>
@@ -228,6 +233,11 @@ describe('CheckoutSagaService.advance', () => {
       saga_step: 'confirmed',
       payment_expires_at: at,
     });
+    // T4.1: order.created trong cùng transaction xác nhận
+    expect(m.insert).toHaveBeenCalledWith(
+      OutboxEvent,
+      expect.objectContaining({ routing_key: 'order.created' }),
+    );
     expect(committed).toBe(true);
     expect(schedule).toHaveBeenCalledWith('o1', at);
     expect(out).toMatchObject({ order: { payment_expires_at: at } });
