@@ -11,6 +11,7 @@ import {
   noLock,
   seedOrder,
   TestDb,
+  noHold,
 } from '../../test-helpers';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { PaymentLedgerService } from '../payment/payment-ledger.service';
@@ -32,11 +33,17 @@ describe('OrderCancelService (Postgres thật)', () => {
     new OrderCancelService(
       db.ds,
       compensation,
-      new PaymentCoreService(db.ds, new PaymentLedgerService(db.ds), noLock),
+      new PaymentCoreService(
+        db.ds,
+        new PaymentLedgerService(db.ds),
+        noLock,
+        noHold,
+      ),
       {
         getOrThrow: () => ({ budgetMs }),
       } as unknown as ConfigService,
       noLock,
+      noHold,
     );
   let service: OrderCancelService;
 

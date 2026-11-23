@@ -3,7 +3,8 @@
 // consumeDiscount (dòng 248–249), xoá dòng giỏ (dòng 252) — nay là lời gọi catalog, promotion và một
 // transaction xác nhận. Không giữ transaction nào trong lúc gọi HTTP.
 // T3.3: luồng thành công. T3.4: handleError theo Processing_Flow §3 (hoàn tác qua CompensationService).
-// Outbox order.created ở T4.1; payment_expires_at ở T3.10.
+// Outbox order.created ở T4.1. T3.10: confirm ghi payment_expires_at = lúc xác nhận + 15 phút, hẹn Redis sau commit
+// (BR-19, NT.ORDER_HOLD §2). Request và cron đối soát cùng đi qua confirm → hạn luôn tính từ lúc xác nhận.
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UpstreamBusinessError, UpstreamError } from '@nextech/service-kit';
@@ -15,6 +16,7 @@ import {
 } from '../../clients/promotion.client';
 import { CartItem } from '../../database/entities/cart-item.entity';
 import { Order } from '../../database/entities/order.entity';
+import { HoldScheduleService } from '../order-hold/hold-schedule.service';
 import { CompensationService } from './compensation.service';
 import { totalOf } from './order-pricing';
 import {
@@ -48,6 +50,7 @@ export class CheckoutSagaService {
     private readonly catalog: CatalogClient,
     private readonly promotion: PromotionClient,
     private readonly compensation: CompensationService,
+    private readonly hold: HoldScheduleService,
   ) {}
 
   /**
@@ -166,19 +169,38 @@ export class CheckoutSagaService {
 
   // Một transaction: processing → pending, xoá đúng các dòng giỏ đã lên đơn (dòng không chọn còn lại,
   // như be/). Đơn đang hoàn tác không được xác nhận. Bên thua đọc lại đơn, không xoá giỏ lần nữa.
-  private confirm(order: Order): Promise<Order> {
-    return this.dataSource.transaction(async (m) => {
-      const r = await m.update(
+  private async confirm(order: Order): Promise<Order> {
+    const expiresAt = this.hold.deadlineFrom();
+    const r = await this.dataSource.transaction(async (m) => {
+      const u = await m.update(
         Order,
         { id: order.id, status: 'processing', saga_step: Not('compensating') },
-        { status: 'pending', saga_step: 'confirmed' },
+        {
+          status: 'pending',
+          saga_step: 'confirmed',
+          payment_expires_at: expiresAt,
+        },
       );
-      if (!r.affected) return m.findOneByOrFail(Order, { id: order.id });
+      if (!u.affected) {
+        return {
+          won: false,
+          order: await m.findOneByOrFail(Order, { id: order.id }),
+        };
+      }
 
       const selected = order.selected_cart_item_ids ?? [];
       if (selected.length) await m.delete(CartItem, { id: In(selected) });
       // outbox order.created: T4.1 (NT.MESSAGING)
-      return { ...order, status: 'pending', saga_step: 'confirmed' };
+      const confirmed: Order = {
+        ...order,
+        status: 'pending',
+        saga_step: 'confirmed',
+        payment_expires_at: expiresAt,
+      };
+      return { won: true, order: confirmed };
     });
+    // Sau commit, chỉ bên thắng. Redis lỗi: log warn, HoldExpiryJob quét DB bù (NT.ORDER_HOLD Processing_Flow §6)
+    if (r.won) await this.hold.schedule(order.id, expiresAt);
+    return r.order;
   }
 }

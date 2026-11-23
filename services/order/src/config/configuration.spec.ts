@@ -3,6 +3,7 @@ import {
   assertRequiredEnv,
   checkoutConfig,
   dbLockConfig,
+  holdConfig,
   orderLockConfig,
   redisConfig,
   payosConfig,
@@ -221,5 +222,42 @@ describe('orderLockConfig, dbLockConfig', () => {
         DB_LOCK_TIMEOUT_MS: '1000',
       }),
     ).toThrow(/ORDER_LOCK_WAIT_MS \+ DB_LOCK_TIMEOUT_MS/);
+  });
+});
+
+// NT.ORDER_HOLD API_Spec §5 (T3.10, BR-19): hạn giữ hàng, job huỷ quá hạn
+describe('holdConfig', () => {
+  it('mặc định: 15 phút, ân hạn 60 s, lượt 15 s, quét DB mỗi 20 lượt, lô 50, hoãn 60 s, hoãn tối đa 10 phút', () => {
+    expect(holdConfig({})).toEqual({
+      ttlMs: 900000,
+      graceMs: 60000,
+      sweepIntervalMs: 15000,
+      dbSweepEvery: 20,
+      batch: 50,
+      deferBackoffMs: 60000,
+      maxDeferMs: 600000,
+    });
+  });
+
+  it('đọc biến thành số', () => {
+    expect(
+      holdConfig({
+        ORDER_HOLD_TTL_MS: '60000',
+        ORDER_HOLD_GRACE_MS: '5000',
+        ORDER_HOLD_SWEEP_INTERVAL_MS: '1000',
+        ORDER_HOLD_DB_SWEEP_EVERY: '3',
+        ORDER_HOLD_BATCH: '10',
+        ORDER_HOLD_DEFER_BACKOFF_MS: '2000',
+        ORDER_HOLD_MAX_DEFER_MS: '30000',
+      }),
+    ).toEqual({
+      ttlMs: 60000,
+      graceMs: 5000,
+      sweepIntervalMs: 1000,
+      dbSweepEvery: 3,
+      batch: 10,
+      deferBackoffMs: 2000,
+      maxDeferMs: 30000,
+    });
   });
 });

@@ -52,6 +52,18 @@ export interface OrderConfig {
   redis: RedisConfig;
   orderLock: OrderLockConfig;
   dbLock: DbLockConfig;
+  hold: HoldConfig;
+}
+
+/** Hạn giữ hàng và job huỷ quá hạn (BR-19, NT.ORDER_HOLD API_Spec §5, Component_Class_Design §8) */
+export interface HoldConfig {
+  ttlMs: number;
+  graceMs: number;
+  sweepIntervalMs: number;
+  dbSweepEvery: number;
+  batch: number;
+  deferBackoffMs: number;
+  maxDeferMs: number;
 }
 
 /** NT.ORDER_HOLD API_Spec §5, Component_Class_Design §2: client Redis trả lỗi nhanh, DB 1 (tách identity) */
@@ -194,6 +206,18 @@ export function orderLockConfig(
   return cfg;
 }
 
+export function holdConfig(env: NodeJS.ProcessEnv = process.env): HoldConfig {
+  return {
+    ttlMs: Number(env.ORDER_HOLD_TTL_MS ?? 900000),
+    graceMs: Number(env.ORDER_HOLD_GRACE_MS ?? 60000),
+    sweepIntervalMs: Number(env.ORDER_HOLD_SWEEP_INTERVAL_MS ?? 15000),
+    dbSweepEvery: Number(env.ORDER_HOLD_DB_SWEEP_EVERY ?? 20),
+    batch: Number(env.ORDER_HOLD_BATCH ?? 50),
+    deferBackoffMs: Number(env.ORDER_HOLD_DEFER_BACKOFF_MS ?? 60000),
+    maxDeferMs: Number(env.ORDER_HOLD_MAX_DEFER_MS ?? 600000),
+  };
+}
+
 export default (): OrderConfig => {
   assertRequiredEnv();
   return {
@@ -205,5 +229,6 @@ export default (): OrderConfig => {
     redis: redisConfig(),
     orderLock: orderLockConfig(),
     dbLock: dbLockConfig(),
+    hold: holdConfig(),
   };
 };

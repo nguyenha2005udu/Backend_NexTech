@@ -1,6 +1,7 @@
 // Saga đặt hàng (NT.CHECKOUT_SAGA Component_Class_Design §1). T3.3: checkout + các bước tiến.
 // T3.4: CompensationService. T3.5: ReconcileJob (cron đối soát), OrderCancelService (export cho admin huỷ). T3.6: PaymentModule.
 import { Module } from '@nestjs/common';
+import { OrderHoldModule } from '../order-hold/order-hold.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClientsModule } from '../../clients/clients.module';
 import { Cart } from '../../database/entities/cart.entity';
@@ -17,6 +18,7 @@ import { ReconcileJob } from './reconcile.job';
 
 @Module({
   imports: [
+    OrderHoldModule,
     TypeOrmModule.forFeature([Cart, Order, OrderItem, SagaTask]),
     ClientsModule,
     // OrderCancelService → PaymentCoreService.voidPendingByOrder (T3.6)

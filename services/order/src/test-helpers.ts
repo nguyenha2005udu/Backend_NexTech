@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { PostgresQueryRunner } from 'typeorm/driver/postgres/PostgresQueryRunner';
 import { dataSourceOptions } from './database/typeorm-options';
+import type { HoldScheduleService } from './modules/order-hold/hold-schedule.service';
 import type { OrderLockService } from './redis/order-lock.service';
 
 // Dựng Postgres thật cho *.int-spec.ts (tdd-guide §5: test đồng thời không dùng mock).
@@ -145,3 +146,13 @@ export async function seedOrder(
 export const noLock = {
   withOrderLock: <T>(_orderId: string, fn: () => Promise<T>) => fn(),
 } as unknown as OrderLockService;
+
+// Hẹn hạn giữ hàng không làm gì (không Redis) cho spec không kiểm hẹn; hạn vẫn tính như thật (15 phút).
+// Spec cần kiểm thì jest.spyOn(noHold, 'schedule' | 'unschedule'). Hẹn thật: hold-expiry.service.int-spec.ts
+export const noHold = {
+  deadlineFrom: (now = new Date()) => new Date(now.getTime() + 15 * 60_000),
+  schedule: () => Promise.resolve(),
+  unschedule: () => Promise.resolve(),
+  defer: () => Promise.resolve(),
+  due: () => Promise.resolve([] as string[]),
+} as unknown as HoldScheduleService;

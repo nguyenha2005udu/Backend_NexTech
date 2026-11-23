@@ -6,8 +6,8 @@
 // qua catalog, promotion sau commit (không gọi HTTP khi giữ transaction). Lệnh lỗi thì ReconcileJob thử lại.
 // Dùng chung cho người mua và admin (NT.ORDER API_Spec route 11), hệ thống khi quá hạn (T3.10).
 // T3.6: giao dịch pending → failed (voidPendingByOrder) trong cùng transaction, như releaseOrderResources của be/.
-// T3.9: cancelByUser bọc withOrderLock (BR-20), bận → 409 NT-ORD-1012. Chưa có: HoldScheduleService.unschedule
-// (T3.10), outbox order.cancelled (T4.1).
+// T3.9: cancelByUser bọc withOrderLock (BR-20), bận → 409 NT-ORD-1012. T3.10: gỡ hẹn hạn giữ hàng sau commit; cancel
+// nhận by = system, reason = payment_timeout (HoldExpiryService). Chưa có: outbox order.cancelled (T4.1).
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
@@ -16,6 +16,7 @@ import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
 import { cannotCancel, lockBusyTo409, orderNotFound } from '../../errors';
 import { OrderLockService } from '../../redis/order-lock.service';
+import { HoldScheduleService } from '../order-hold/hold-schedule.service';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { CompensationService, compensationTasks } from './compensation.service';
 
@@ -40,6 +41,7 @@ export class OrderCancelService {
     private readonly paymentCore: PaymentCoreService,
     config: ConfigService,
     private readonly lock: OrderLockService,
+    private readonly hold: HoldScheduleService,
   ) {
     this.budgetMs = config.getOrThrow<CheckoutConfig>('checkout').budgetMs;
   }
@@ -49,7 +51,7 @@ export class OrderCancelService {
     const { result, tasks } = await this.lock
       .withOrderLock(id, () => this.cancelByUserTx(userId, id))
       .catch(lockBusyTo409);
-    // T3.10: HoldScheduleService.unschedule(id) sau commit
+    await this.hold.unschedule(id); // sau commit (BR-19)
     await this.releaseAfterCommit(id, tasks);
     return result;
   }
@@ -76,6 +78,7 @@ export class OrderCancelService {
     m: EntityManager,
     order: Order,
     by: CancelledBy,
+    reason?: 'payment_timeout',
   ): Promise<{ result: CancelResponse; tasks: CancelTask[] }> {
     // UPDATE … RETURNING (v1.7): m.save của be/ có thể đọc lại đơn thêm một câu
     const updated = await m
@@ -93,7 +96,9 @@ export class OrderCancelService {
     const inserted = await m.insert(SagaTask, list);
     // T4.1: outbox order.cancelled { order_id, user_id, cancelled_by: by }. Tới lúc đó ghi log để lần ra
     // ai huỷ (chỉ id đơn và vai, không dữ liệu cá nhân — security-policy §5)
-    this.logger.log(`Đơn ${order.id} huỷ bởi ${by}`);
+    this.logger.log(
+      `Đơn ${order.id} huỷ bởi ${by}${reason ? ` (${reason})` : ''}`,
+    );
 
     return {
       result: {

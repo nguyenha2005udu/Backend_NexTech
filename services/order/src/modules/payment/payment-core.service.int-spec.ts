@@ -13,6 +13,7 @@ import {
   noLock,
   seedOrder,
   TestDb,
+  noHold,
 } from '../../test-helpers';
 import { OrderLockBusyError } from '../../database/db-lock-error';
 import type { OrderLockService } from '../../redis/order-lock.service';
@@ -41,7 +42,7 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
   beforeAll(async () => {
     db = await createTestDb();
     ledger = new PaymentLedgerService(db.ds);
-    core = new PaymentCoreService(db.ds, ledger, noLock);
+    core = new PaymentCoreService(db.ds, ledger, noLock, noHold);
     const compensation = new CompensationService(
       db.ds.getRepository(Order),
       db.ds.getRepository(SagaTask),
@@ -55,6 +56,7 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
       core,
       { getOrThrow: () => ({ budgetMs: 8000 }) } as unknown as ConfigService,
       noLock,
+      noHold,
     );
   });
   afterAll(async () => db?.cleanup());
@@ -401,6 +403,7 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
         db.ds,
         ledger,
         lock as unknown as OrderLockService,
+        noHold,
       );
       const cod = await seed({ method: 'cod', code: null });
       await c.confirmCod(cod.paymentId);
@@ -426,6 +429,7 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
         db.ds,
         ledger,
         lockOf(true) as unknown as OrderLockService,
+        noHold,
       );
       const p = await seed({ code: '333' });
       await expect(
@@ -438,6 +442,32 @@ describe('PaymentCoreService + PaymentLedgerService (Postgres thật)', () => {
       expect((await payment(p.paymentId)).status).toBe('pending');
       expect((await payment(cod.paymentId)).status).toBe('pending');
       expect(await orderStatus(p.orderId)).toBe('pending');
+    });
+  });
+
+  describe('gỡ hẹn hạn giữ hàng (T3.10, BR-19)', () => {
+    it('markSuccess, confirmCod thành công → unschedule(order_id) sau commit; khoá bận → không gỡ', async () => {
+      const unschedule = jest.spyOn(noHold, 'unschedule');
+      const p = await seed({ code: '444' });
+      await core.markSuccess({ paymentId: p.paymentId, paidAmount: 230000 });
+      expect(unschedule).toHaveBeenLastCalledWith(p.orderId);
+      const cod = await seed({ method: 'cod', code: null });
+      await core.confirmCod(cod.paymentId);
+      expect(unschedule).toHaveBeenLastCalledWith(cod.orderId);
+      unschedule.mockClear();
+      const busy = new PaymentCoreService(
+        db.ds,
+        ledger,
+        {
+          withOrderLock: (id: string) =>
+            Promise.reject(new OrderLockBusyError(id)),
+        } as unknown as OrderLockService,
+        noHold,
+      );
+      const q = await seed({ code: '555' });
+      await busy.markSuccess({ paymentId: q.paymentId }).catch(() => undefined);
+      expect(unschedule).not.toHaveBeenCalled();
+      unschedule.mockRestore();
     });
   });
 

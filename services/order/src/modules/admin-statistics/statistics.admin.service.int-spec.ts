@@ -8,6 +8,7 @@ import {
   noLock,
   seedOrder,
   TestDb,
+  noHold,
 } from '../../test-helpers';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { PaymentLedgerService } from '../payment/payment-ledger.service';
@@ -37,6 +38,7 @@ describe('AdminStatisticsService.getOverview (Postgres thật)', () => {
       db.ds,
       new PaymentLedgerService(db.ds),
       noLock,
+      noHold,
     );
     service = new AdminStatisticsService(
       db.ds.getRepository(Order),

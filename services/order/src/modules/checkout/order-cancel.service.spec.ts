@@ -7,6 +7,7 @@ import type { OrderLockService } from '../../redis/order-lock.service';
 import type { PaymentCoreService } from '../payment/payment-core.service';
 import type { CompensationService } from './compensation.service';
 import { OrderCancelService } from './order-cancel.service';
+import { noHold } from '../../test-helpers';
 
 // NT.CHECKOUT_SAGA Component_Class_Design §7.1 (v1.7), API_Spec §2. Đua thật (huỷ hai lần đồng thời),
 // số truy vấn: order-cancel.service.int-spec.ts.
@@ -41,6 +42,7 @@ describe('OrderCancelService', () => {
       getOrThrow: () => ({ budgetMs: 8000 }),
     } as unknown as ConfigService,
     lock as unknown as OrderLockService,
+    noHold,
   );
 
   const UPDATED_AT = new Date('2026-11-21T10:00:00Z');
@@ -94,6 +96,14 @@ describe('OrderCancelService', () => {
       expect(err.getStatus?.()).toBe(409);
       expect(ds.transaction).not.toHaveBeenCalled();
       expect(compensation.run).not.toHaveBeenCalled();
+    });
+
+    it('gỡ hẹn hạn giữ hàng sau commit (BR-19, NT.ORDER_HOLD §10)', async () => {
+      m.findOne.mockResolvedValue(order());
+      const unschedule = jest.spyOn(noHold, 'unschedule');
+      await svc.cancelByUser('u1', 'o1');
+      expect(unschedule).toHaveBeenCalledWith('o1');
+      unschedule.mockRestore();
     });
 
     it('khoá dòng đơn của đúng người gọi (FOR UPDATE, như be/)', async () => {

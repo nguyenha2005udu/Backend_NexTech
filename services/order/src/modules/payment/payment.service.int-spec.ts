@@ -9,6 +9,7 @@ import {
   noLock,
   seedOrder,
   TestDb,
+  noHold,
 } from '../../test-helpers';
 import { OrderLockBusyError } from '../../database/db-lock-error';
 import { PaymentCoreService } from './payment-core.service';
@@ -43,6 +44,7 @@ describe('PaymentService (Postgres thật)', () => {
       db.ds,
       new PaymentLedgerService(db.ds),
       noLock,
+      noHold,
     );
     service = new PaymentService(
       db.ds.getRepository(Order),
@@ -51,6 +53,7 @@ describe('PaymentService (Postgres thật)', () => {
       payos as unknown as PayOS,
       core,
       { getOrThrow: () => PAYOS_CFG } as unknown as ConfigService,
+      noHold,
     );
   });
   afterAll(async () => db?.cleanup());
@@ -280,6 +283,27 @@ describe('PaymentService (Postgres thật)', () => {
       const p = await paymentOf(o.orderId);
       expect(p?.transaction_id).not.toBe(oldCode);
       expect(p?.previous_transaction_ids).toEqual([oldCode]);
+    });
+  });
+
+  describe('hạn giữ hàng (T3.10)', () => {
+    it('chọn COD → payment_expires_at NULL và gỡ hẹn sau commit; PayOS → hạn giữ nguyên, không gỡ (BR-19, #10)', async () => {
+      const unschedule = jest.spyOn(noHold, 'unschedule');
+      const cod = await pendingOrder();
+      await service.create(cod.userId, {
+        order_id: cod.orderId,
+        method: 'cod',
+      });
+      expect(unschedule).toHaveBeenCalledWith(cod.orderId);
+      expect((await orderOf(cod.orderId)).payment_expires_at).toBeNull();
+      unschedule.mockClear();
+      const pay = await pendingOrder();
+      await service.create(pay.userId, {
+        order_id: pay.orderId,
+        method: 'payos',
+      });
+      expect(unschedule).not.toHaveBeenCalled();
+      unschedule.mockRestore();
     });
   });
 

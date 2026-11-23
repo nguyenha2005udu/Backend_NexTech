@@ -2,7 +2,7 @@
 // - markSuccess: tìm giao dịch (findForWebhook, tra cả mã cũ previous_transaction_ids) NGOÀI transaction để biết
 //   order_id rồi bọc withOrderLock(order_id) (T3.9, BR-20; khoá bận → OrderLockBusyError, bên gọi đổi); trong transaction khoá đơn rồi khoá giao dịch như be/; ghi bằng UPDATE thay
 //   save (bớt câu đọc lại). Thêm BR-10: trả hai link → needs_refund; tiền về khi đơn huỷ/failed → needs_refund.
-//   Chốt sổ tiền về cùng transaction (ledgerId). T4.1: outbox order.paid. T3.10: unschedule sau commit.
+//   Chốt sổ tiền về cùng transaction (ledgerId). T4.1: outbox order.paid. T3.10: gỡ hẹn hạn giữ hàng sau commit.
 // - markFailed: một UPDATE … WHERE status='pending' (B15) thay đọc rồi save: không ghi failed đè success.
 // - confirmCod: withOrderLock (T3.9), khoá đơn rồi giao dịch như markSuccess (be/ không khoá đơn); đổi đơn paid như be/.
 // - confirmCodForOrder → confirmCodByOrder(manager, orderId); thêm voidPendingByOrder (từ releaseOrderResources
@@ -23,6 +23,7 @@ import {
   OrderLockService,
   type OrderLockOptions,
 } from '../../redis/order-lock.service';
+import { HoldScheduleService } from '../order-hold/hold-schedule.service';
 import { PaymentLedgerService } from './payment-ledger.service';
 
 /** id và order_id của giao dịch — đủ để khoá đơn trước */
@@ -53,6 +54,7 @@ export class PaymentCoreService {
     private readonly dataSource: DataSource,
     private readonly ledger: PaymentLedgerService,
     private readonly lock: OrderLockService,
+    private readonly hold: HoldScheduleService,
   ) {}
 
   /** Tìm giao dịch theo mã PayOS hiện hành hoặc mã cũ (index GIN ix_payments_prev_codes) */
@@ -84,11 +86,15 @@ export class PaymentCoreService {
           : null);
     if (!found) throw paymentNotFound();
 
-    return this.lock.withOrderLock(
+    const saved = await this.lock.withOrderLock(
       found.order_id,
       () => this.markSuccessTx(found, params),
       opts,
     );
+    // Giao dịch success thì đơn không còn pending (paid, hoặc đã huỷ/giao + needs_refund): gỡ hẹn không điều kiện,
+    // gỡ thừa vô hại, khỏi đọc lại đơn (NT.ORDER_HOLD v1.4, T3.10)
+    await this.hold.unschedule(found.order_id);
+    return saved;
   }
 
   private markSuccessTx(
@@ -223,9 +229,11 @@ export class PaymentCoreService {
     const found = await this.refById(paymentId);
     if (!found) throw paymentNotFound();
 
-    return this.lock.withOrderLock(found.order_id, () =>
+    const saved = await this.lock.withOrderLock(found.order_id, () =>
       this.confirmCodTx(found),
     );
+    await this.hold.unschedule(found.order_id); // đơn paid (BR-19)
+    return saved;
   }
 
   private confirmCodTx(found: PaymentRef): Promise<Payment> {
