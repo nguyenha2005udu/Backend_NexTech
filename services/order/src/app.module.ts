@@ -21,10 +21,11 @@ import { CartModule } from './modules/cart/cart.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { HoldExpiryModule } from './modules/hold-expiry/hold-expiry.module';
 import { ORDER_REDIS, RedisModule } from './redis/redis.module';
 
 // Khung T1.6: khởi động, kết nối database, /health. T3.1: giỏ hàng. T3.2: xem đơn, admin đơn,
-// /internal/purchases. T3.3: checkout (saga). T3.5: cron đối soát, huỷ đơn. T3.6: thanh toán. T3.7: thống kê tổng quan. T3.9: Redis, khoá đơn. Module khác thêm ở task sau
+// /internal/purchases. T3.3: checkout (saga). T3.5: cron đối soát, huỷ đơn. T3.6: thanh toán. T3.7: thống kê tổng quan. T3.9: Redis, khoá đơn. T3.10: hạn giữ hàng. Module khác thêm ở task sau
 // (implementation/PHASE-3.md).
 @Module({
   imports: [
@@ -58,6 +59,8 @@ import { ORDER_REDIS, RedisModule } from './redis/redis.module';
     AdminPaymentModule,
     AdminRevenueModule,
     AdminStatisticsModule,
+    // Job huỷ đơn quá hạn giữ hàng (T3.10, BR-19) — module ngọn
+    HoldExpiryModule,
     InternalModule,
   ],
 })

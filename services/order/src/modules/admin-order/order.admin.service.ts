@@ -13,6 +13,7 @@ import { OrderItem } from '../../database/entities/order-item.entity';
 import { Payment } from '../../database/entities/payment.entity';
 import { invalidTransition, lockBusyTo409, orderNotFound } from '../../errors';
 import { OrderLockService } from '../../redis/order-lock.service';
+import { HoldScheduleService } from '../order-hold/hold-schedule.service';
 import { OrderCancelService } from '../checkout/order-cancel.service';
 import { PaymentCoreService } from '../payment/payment-core.service';
 import { paymentExpiresAt } from '../order/order.service';
@@ -38,6 +39,7 @@ export class AdminOrderService {
     private readonly orderCancel: OrderCancelService,
     private readonly paymentCore: PaymentCoreService,
     private readonly lock: OrderLockService,
+    private readonly hold: HoldScheduleService,
   ) {}
 
   // GET /api/admin/orders — 2 truy vấn: count + data (product_count là subquery, không nhân dòng)
@@ -143,7 +145,9 @@ export class AdminOrderService {
       .withOrderLock(id, () => this.updateStatusTx(id, dto))
       .catch(lockBusyTo409);
 
-    // Sau commit, giống người mua huỷ: nhả trong ngân sách, lỗi thì cron. T3.10: unschedule hạn giữ hàng.
+    // Sau commit: đơn đã rời pending (shipped / cancelled) → gỡ hẹn (BR-19; gỡ thừa vô hại). Huỷ: nhả trong ngân
+    // sách như người mua huỷ, lỗi thì cron.
+    await this.hold.unschedule(id);
     if (r.tasks) await this.orderCancel.releaseAfterCommit(id, r.tasks);
     return r.result;
   }

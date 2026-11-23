@@ -7,6 +7,7 @@ import { OrderLockBusyError } from '../../database/db-lock-error';
 import type { OrderLockService } from '../../redis/order-lock.service';
 import type { PaymentCoreService } from '../payment/payment-core.service';
 import { AdminOrderService } from './order.admin.service';
+import { noHold } from '../../test-helpers';
 
 // PUT /api/admin/orders/:id/status — NT.ORDER API_Spec §1 route 11, business-spec §5 (BR-06),
 // Component_Class_Design §7 "Chuyển trạng thái sai → 400 NT-ORD-1007". T3.5: huỷ qua OrderCancelService
@@ -38,6 +39,7 @@ describe('AdminOrderService.updateStatus', () => {
     orderCancel as unknown as OrderCancelService,
     paymentCore as unknown as PaymentCoreService,
     lock as unknown as OrderLockService,
+    noHold,
   );
 
   const givenOrder = (status: OrderStatus) =>
@@ -68,6 +70,20 @@ describe('AdminOrderService.updateStatus', () => {
     await service.updateStatus('o1', { status: 'shipped' });
     expect(lock.withOrderLock).toHaveBeenCalledWith('o1', expect.any(Function));
   });
+
+  it.each<['cancelled' | 'shipped', OrderStatus]>([
+    ['cancelled', 'pending'],
+    ['shipped', 'paid'],
+  ])(
+    'đổi sang %s → gỡ hẹn hạn giữ hàng sau commit (BR-19)',
+    async (to, from) => {
+      givenOrder(from);
+      const unschedule = jest.spyOn(noHold, 'unschedule');
+      await service.updateStatus('o1', { status: to });
+      expect(unschedule).toHaveBeenCalledWith('o1');
+      unschedule.mockRestore();
+    },
+  );
 
   it('khoá đơn bận → 409 NT-ORD-1012, đơn không đổi, không nhả (NT.ORDER §7)', async () => {
     lock.withOrderLock.mockRejectedValue(new OrderLockBusyError('o1', 'db'));

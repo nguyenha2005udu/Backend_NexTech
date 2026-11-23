@@ -8,7 +8,7 @@ import { Cart } from '../../database/entities/cart.entity';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
-import { countQueries, createTestDb, TestDb } from '../../test-helpers';
+import { countQueries, createTestDb, TestDb, noHold } from '../../test-helpers';
 import { CheckoutSagaService } from './checkout-saga.service';
 import { CheckoutService } from './checkout.service';
 import { CompensationService } from './compensation.service';
@@ -58,6 +58,7 @@ describe('ReconcileJob (Postgres thật)', () => {
       catalog as unknown as CatalogClient,
       promotion as unknown as PromotionClient,
       compensation,
+      noHold,
     );
     service = new CheckoutService(
       db.ds.getRepository(Cart),

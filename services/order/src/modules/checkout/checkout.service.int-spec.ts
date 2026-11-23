@@ -9,7 +9,7 @@ import type { PromotionClient } from '../../clients/promotion.client';
 import { Cart } from '../../database/entities/cart.entity';
 import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
-import { countQueries, createTestDb, TestDb } from '../../test-helpers';
+import { countQueries, createTestDb, TestDb, noHold } from '../../test-helpers';
 import { CheckoutSagaService } from './checkout-saga.service';
 import { CheckoutService } from './checkout.service';
 import { CompensationService } from './compensation.service';
@@ -61,6 +61,7 @@ describe('CheckoutService (Postgres thật)', () => {
       catalog as unknown as CatalogClient,
       promotion as unknown as PromotionClient,
       compensation,
+      noHold,
     );
     service = new CheckoutService(
       db.ds.getRepository(Cart),
@@ -153,6 +154,7 @@ describe('CheckoutService (Postgres thật)', () => {
     ]);
 
     const q = countQueries();
+    const t0 = Date.now();
     const r = await service.checkout(
       u,
       { address_id: randomUUID(), discount_code: 'SALE10' },
@@ -170,8 +172,12 @@ describe('CheckoutService (Postgres thật)', () => {
       shipping_discount_amount: 0,
       total: 345000,
       status: 'pending',
-      payment_expires_at: null,
     });
+    // AC-03 (T3.10, BR-19): hạn = lúc xác nhận + 15 phút
+    const exp = (r.body as { payment_expires_at: Date }).payment_expires_at;
+    expect(exp).toBeInstanceOf(Date);
+    expect(exp.getTime()).toBeGreaterThanOrEqual(t0 + 15 * 60_000 - 1000);
+    expect(exp.getTime()).toBeLessThanOrEqual(Date.now() + 15 * 60_000 + 1000);
     expect(promotion.redeem).toHaveBeenCalledWith(
       expect.objectContaining({
         subtotal: 350000,

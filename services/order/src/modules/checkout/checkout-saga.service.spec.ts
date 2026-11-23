@@ -7,6 +7,7 @@ import { CartItem } from '../../database/entities/cart-item.entity';
 import { Order } from '../../database/entities/order.entity';
 import { CheckoutSagaService } from './checkout-saga.service';
 import type { CompensationService } from './compensation.service';
+import { noHold } from '../../test-helpers';
 
 // NT.CHECKOUT_SAGA Component_Class_Design §4 (advance, setStep có điều kiện, ngân sách), §5 (confirm),
 // §8 test 2 (không mã → không gọi promotion), 21 (setStep không khớp → không confirm); handleError (v1.6,
@@ -34,6 +35,7 @@ describe('CheckoutSagaService.advance', () => {
     catalog as unknown as CatalogClient,
     promotion as unknown as PromotionClient,
     compensation as unknown as CompensationService,
+    noHold,
   );
 
   const FAR = Date.now() + 60_000;
@@ -86,7 +88,11 @@ describe('CheckoutSagaService.advance', () => {
     expect(m.update).toHaveBeenCalledWith(
       Order,
       { id: 'o1', status: 'processing', saga_step: Not('compensating') },
-      { status: 'pending', saga_step: 'confirmed' },
+      {
+        status: 'pending',
+        saga_step: 'confirmed',
+        payment_expires_at: expect.any(Date) as unknown,
+      },
     );
     expect(m.delete).toHaveBeenCalledWith(CartItem, { id: In(['c1', 'c2']) });
     expect(out.kind).toBe('confirmed');
@@ -203,15 +209,44 @@ describe('CheckoutSagaService.advance', () => {
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
+  it('confirm ghi payment_expires_at = lúc xác nhận + 15 phút, hẹn Redis SAU commit, trả kèm hạn (BR-19, #8)', async () => {
+    const at = new Date('2026-11-23T10:15:00Z');
+    const deadline = jest.spyOn(noHold, 'deadlineFrom').mockReturnValue(at);
+    const schedule = jest.spyOn(noHold, 'schedule');
+    let committed = false;
+    dataSource.transaction.mockImplementationOnce(
+      async (cb: (em: EntityManager) => Promise<unknown>) => {
+        const r = await cb(m as unknown as EntityManager);
+        expect(schedule).not.toHaveBeenCalled(); // chưa commit thì chưa hẹn
+        committed = true;
+        return r;
+      },
+    );
+    const out = await saga.advance(order({ saga_step: 'stock_reserved' }), FAR);
+    expect(m.update).toHaveBeenCalledWith(Order, expect.anything(), {
+      status: 'pending',
+      saga_step: 'confirmed',
+      payment_expires_at: at,
+    });
+    expect(committed).toBe(true);
+    expect(schedule).toHaveBeenCalledWith('o1', at);
+    expect(out).toMatchObject({ order: { payment_expires_at: at } });
+    deadline.mockRestore();
+    schedule.mockRestore();
+  });
+
   it('confirm thua (bên khác đã confirm) → đọc lại, không xoá giỏ lần nữa', async () => {
     m.update.mockResolvedValue({ affected: 0 });
     m.findOneByOrFail.mockResolvedValue(
       order({ status: 'pending', saga_step: 'confirmed' }),
     );
 
+    const schedule = jest.spyOn(noHold, 'schedule');
     const out = await saga.advance(order({ saga_step: 'stock_reserved' }), FAR);
 
     expect(m.delete).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled(); // bên thắng đã hẹn
+    schedule.mockRestore();
     expect(out).toMatchObject({
       kind: 'confirmed',
       order: { status: 'pending' },

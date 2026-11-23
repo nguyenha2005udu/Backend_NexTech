@@ -3,7 +3,7 @@
 //   vào previous_transaction_ids thay vì xoá; PayOS lỗi/timeout → 503 NT-PAY-1006 (be/ 400 kèm lỗi PayOS), giữ mã.
 //   Chống đua với job huỷ quá hạn bằng UPDATE orders có điều kiện trong transaction ghi giao dịch, không khoá Redis
 //   (sổ A7, NT.ORDER_HOLD API_Spec §2): COD dừng hạn (payment_expires_at NULL). Thêm NT-PAY-1010, expires_at,
-//   expiredAt gửi PayOS (BR-19). Không giữ transaction khi gọi PayOS. T3.10: unschedule sau commit (COD).
+//   expiredAt gửi PayOS (BR-19). Không giữ transaction khi gọi PayOS. T3.10: COD gỡ hẹn sau commit.
 // - getStatus: giữ cơ chế chủ động hỏi PayOS; PAID đi qua markSuccess với giao dịch đã đọc (khỏi tra lại).
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -24,6 +24,7 @@ import {
   paymentOrderNotFound,
   providerFailed,
 } from '../../errors';
+import { HoldScheduleService } from '../order-hold/hold-schedule.service';
 import { PaymentCoreService } from './payment-core.service';
 import { CreatePaymentDto } from './payment.dto';
 import { generateProviderOrderCode } from './provider-order-code.util';
@@ -47,6 +48,7 @@ export class PaymentService {
     @Inject(PAYOS_CLIENT) private readonly payos: PayOS,
     private readonly paymentCore: PaymentCoreService,
     config: ConfigService,
+    private readonly hold: HoldScheduleService,
   ) {
     this.cfg = config.getOrThrow<PayosConfig>('payos');
   }
@@ -78,7 +80,8 @@ export class PaymentService {
         if (isUniqueViolation(err, UQ_PAYMENT_ORDER)) throw paymentExists();
         throw err;
       });
-    // T3.10: COD → HoldScheduleService.unschedule(order.id) sau commit
+    // COD đã dừng hạn (payment_expires_at NULL trong transaction) → gỡ hẹn sau commit (BR-19)
+    if (!isPayos) await this.hold.unschedule(order.id);
 
     let payment_url: string | null = null;
     // Chuỗi VietQR để FE render mã QR ngay trong app (quét bằng app ngân hàng) — như be/

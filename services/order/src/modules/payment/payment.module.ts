@@ -2,8 +2,9 @@
 // huỷ đơn (voidPendingByOrder), admin giao COD (confirmCodByOrder), admin giao dịch, thống kê (sumRevenue — T3.7);
 // PaymentLedgerService cho admin chi tiết (transactions).
 import { Module } from '@nestjs/common';
+import { OrderHoldModule } from '../order-hold/order-hold.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { PayosProvider } from '../../config/payos';
+import { PAYOS_CLIENT, PayosProvider } from '../../config/payos';
 import { Order } from '../../database/entities/order.entity';
 import { Payment } from '../../database/entities/payment.entity';
 import { PaymentCoreService } from './payment-core.service';
@@ -13,7 +14,7 @@ import { PaymentService } from './payment.service';
 import { PayosWebhookController } from './payos-webhook.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Order, Payment])],
+  imports: [TypeOrmModule.forFeature([Order, Payment]), OrderHoldModule],
   controllers: [PaymentController, PayosWebhookController],
   providers: [
     PayosProvider,
@@ -21,6 +22,7 @@ import { PayosWebhookController } from './payos-webhook.controller';
     PaymentCoreService,
     PaymentLedgerService,
   ],
-  exports: [PaymentCoreService, PaymentLedgerService],
+  // PAYOS_CLIENT: HoldExpiryService hỏi PayOS trước khi huỷ đơn quá hạn (T3.10)
+  exports: [PaymentCoreService, PaymentLedgerService, PAYOS_CLIENT],
 })
 export class PaymentModule {}

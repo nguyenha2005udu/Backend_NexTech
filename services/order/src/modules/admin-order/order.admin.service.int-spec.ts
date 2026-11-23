@@ -10,6 +10,7 @@ import {
   noLock,
   seedOrder,
   TestDb,
+  noHold,
 } from '../../test-helpers';
 import { CompensationService } from '../checkout/compensation.service';
 import { OrderCancelService } from '../checkout/order-cancel.service';
@@ -42,6 +43,7 @@ describe('AdminOrderService (Postgres thật)', () => {
       db.ds,
       new PaymentLedgerService(db.ds),
       noLock,
+      noHold,
     );
     const orderCancel = new OrderCancelService(
       db.ds,
@@ -51,6 +53,7 @@ describe('AdminOrderService (Postgres thật)', () => {
         getOrThrow: () => ({ budgetMs: 8000 }),
       } as unknown as ConfigService,
       noLock,
+      noHold,
     );
     service = new AdminOrderService(
       db.ds.getRepository(Order),
@@ -58,6 +61,7 @@ describe('AdminOrderService (Postgres thật)', () => {
       orderCancel,
       paymentCore,
       noLock,
+      noHold,
     );
   });
   afterAll(async () => db?.cleanup());

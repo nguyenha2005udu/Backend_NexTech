@@ -6,6 +6,7 @@ import {
   noLock,
   seedOrder,
   TestDb,
+  noHold,
 } from '../../test-helpers';
 import { OrderLockBusyError } from '../../database/db-lock-error';
 import type { OrderLockService } from '../../redis/order-lock.service';
@@ -29,7 +30,7 @@ describe('AdminPaymentService + RevenueService (Postgres thật)', () => {
   beforeAll(async () => {
     db = await createTestDb();
     ledger = new PaymentLedgerService(db.ds);
-    const core = new PaymentCoreService(db.ds, ledger, noLock);
+    const core = new PaymentCoreService(db.ds, ledger, noLock, noHold);
     admin = new AdminPaymentService(db.ds.getRepository(Payment), core, ledger);
     revenue = new RevenueService(db.ds.getRepository(Payment));
   });
@@ -164,7 +165,7 @@ describe('AdminPaymentService + RevenueService (Postgres thật)', () => {
     } as unknown as OrderLockService;
     const a = new AdminPaymentService(
       db.ds.getRepository(Payment),
-      new PaymentCoreService(db.ds, ledger, busy),
+      new PaymentCoreService(db.ds, ledger, busy, noHold),
       ledger,
     );
     const s = await seedPayment({ method: 'cod', code: null });
