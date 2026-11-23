@@ -37,5 +37,29 @@ export { HealthModule, type HealthModuleOptions } from './health/health.module';
 export {
   typeOrmHealthCheck,
   redisHealthCheck,
+  rabbitHealthCheck,
   type HealthCheck,
 } from './health/checks';
+
+export {
+  EVENTS_EXCHANGE,
+  RETRY_EXCHANGE,
+  DLQ_EXCHANGE,
+  parseEnvelope,
+  type EventEnvelope,
+} from './messaging/envelope';
+export { RetryableError, PoisonMessageError } from './messaging/errors';
+export { messagingConfig, type MessagingConfig } from './messaging/config';
+export { OutboxEvent } from './messaging/outbox.entity';
+export { OutboxWriter } from './messaging/outbox-writer';
+export {
+  OutboxPublisher,
+  type OutboxPublisherOptions,
+  type PublisherChannel,
+} from './messaging/outbox-publisher';
+export {
+  RabbitConsumer,
+  type RabbitConsumerOptions,
+  type ConsumeOutcome,
+  type ConsumerChannel,
+} from './messaging/rabbit-consumer';
