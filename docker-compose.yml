@@ -96,6 +96,19 @@ services:
       retries: 20
     networks: [nextech]
 
+  # FPT AI giả cho assistant-service (NT.ASSISTANT_CHAT §6, ADR-0013): chạy được không cần key thật.
+  # Đổi chế độ: curl -X POST localhost:4020/__mock/mode -d '{"mode":"down"}'
+  ai-mock:
+    build: ./infra/ai-mock
+    restart: unless-stopped
+    ports: ["4020:4020"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4020/health').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [nextech]
+
   # Cổng vào duy nhất của API (security-policy §3.2). Service chưa chạy thì trả 503 NT-GW-0503.
   api-gateway:
     <<: *service-defaults
