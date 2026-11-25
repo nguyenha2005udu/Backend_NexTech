@@ -1,4 +1,4 @@
-import { assertRequiredEnv, databaseConfig } from './configuration';
+import { assertRequiredEnv, databaseConfig, mailConfig } from './configuration';
 
 // coding-convention §6: thiếu biến bắt buộc thì dừng khởi động và nêu rõ tên biến
 describe('assertRequiredEnv', () => {
@@ -7,6 +7,7 @@ describe('assertRequiredEnv', () => {
     DB_USER: 'notification_user',
     DB_PASS: 'notification_pass',
     DB_NAME: 'notification_db',
+    IDENTITY_SERVICE_URL: 'http://identity-service:3001',
   };
 
   it('đủ biến → không lỗi', () => {
@@ -17,6 +18,21 @@ describe('assertRequiredEnv', () => {
     expect(() =>
       assertRequiredEnv({ ...full, DB_USER: undefined, DB_PASS: '' }),
     ).toThrow('Thiếu biến môi trường bắt buộc: DB_USER, DB_PASS');
+  });
+
+  it('thiếu IDENTITY_SERVICE_URL → lỗi (T4.2: lấy email người nhận)', () => {
+    expect(() =>
+      assertRequiredEnv({ ...full, IDENTITY_SERVICE_URL: undefined }),
+    ).toThrow('IDENTITY_SERVICE_URL');
+  });
+});
+
+describe('mailConfig', () => {
+  it('mặc định requireTLS bật, cổng 587; MAIL_REQUIRE_TLS=false tắt (Mailpit)', () => {
+    expect(mailConfig({})).toMatchObject({ port: 587, requireTLS: true });
+    expect(
+      mailConfig({ MAIL_REQUIRE_TLS: 'false', MAIL_PORT: '1025' }),
+    ).toMatchObject({ port: 1025, requireTLS: false });
   });
 });
 
