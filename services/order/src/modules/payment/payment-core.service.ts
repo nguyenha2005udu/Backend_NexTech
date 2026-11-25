@@ -11,6 +11,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Order } from '../../database/entities/order.entity';
+import { orderEvents } from '../../outbox/order-events';
 import { Payment } from '../../database/entities/payment.entity';
 import type { LedgerOutcome } from '../../database/entities/payment-transaction.entity';
 import {
@@ -167,9 +168,10 @@ export class PaymentCoreService {
         },
       );
 
-      if (payable) {
+      if (payable && order) {
         await m.update(Order, { id: found.order_id }, { status: 'paid' });
-        // T4.1: outbox order.paid { order_id, user_id, total } cùng transaction
+        // T4.1: order.paid cùng transaction
+        await orderEvents.paid(m, order);
       } else if (needsRefund) {
         // Đơn huỷ/failed mà khách vẫn chuyển khoản → giữ nguyên đơn, hoàn tiền tay
         this.logger.warn(
@@ -238,7 +240,7 @@ export class PaymentCoreService {
 
   private confirmCodTx(found: PaymentRef): Promise<Payment> {
     return this.dataSource.transaction(async (m) => {
-      await m.findOne(Order, {
+      const order = await m.findOne(Order, {
         where: { id: found.order_id },
         lock: { mode: 'pessimistic_write' },
       });
@@ -257,8 +259,9 @@ export class PaymentCoreService {
         { id: p.id },
         { status: 'success', paid_at: paidAt },
       );
-      // be/: đặt đơn paid (không điều kiện). T4.1: outbox order.paid
+      // be/: đặt đơn paid (không điều kiện). T4.1: order.paid cùng transaction
       await m.update(Order, { id: p.order_id }, { status: 'paid' });
+      if (order) await orderEvents.paid(m, order);
       return { ...p, status: 'success', paid_at: paidAt };
     });
   }

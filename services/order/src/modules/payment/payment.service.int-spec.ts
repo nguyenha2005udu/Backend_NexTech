@@ -406,7 +406,8 @@ describe('PaymentService (Postgres thật)', () => {
       await service.getStatus(s.userId, s.paymentId);
       const n = q.count;
       q.restore();
-      expect(n).toBe(5);
+      // T4.1: + outbox order.paid
+      expect(n).toBe(6);
     });
   });
 });

@@ -17,6 +17,23 @@ export function typeOrmHealthCheck(): HealthCheck {
   };
 }
 
+/**
+ * `token`: provider có `isConnected()` (OutboxPublisher, RabbitConsumer). Mặc định không bắt buộc:
+ * RabbitMQ chết không làm service bị coi là chết (NT.MESSAGING, PHASE-4 T4.1).
+ */
+export function rabbitHealthCheck(token: unknown): HealthCheck {
+  return {
+    name: 'rabbitmq',
+    required: false,
+    check: async (ref) => {
+      const p = ref.get<{ isConnected(): boolean }>(token as string, {
+        strict: false,
+      });
+      if (!p.isConnected()) throw new Error('rabbitmq disconnected');
+    },
+  };
+}
+
 /** `token`: provider của client Redis trong service (ioredis), ví dụ 'REDIS_CLIENT'. */
 export function redisHealthCheck(token: string | symbol): HealthCheck {
   return {

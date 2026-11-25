@@ -13,6 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 import type { CheckoutConfig } from '../../config/configuration';
 import { Order } from '../../database/entities/order.entity';
+import { orderEvents } from '../../outbox/order-events';
 import { SagaTask } from '../../database/entities/saga-task.entity';
 import { cannotCancel, lockBusyTo409, orderNotFound } from '../../errors';
 import { OrderLockService } from '../../redis/order-lock.service';
@@ -94,8 +95,9 @@ export class OrderCancelService {
     await this.paymentCore.voidPendingByOrder(m, order.id);
     const list = compensationTasks(order);
     const inserted = await m.insert(SagaTask, list);
-    // T4.1: outbox order.cancelled { order_id, user_id, cancelled_by: by }. Tới lúc đó ghi log để lần ra
-    // ai huỷ (chỉ id đơn và vai, không dữ liệu cá nhân — security-policy §5)
+    // T4.1: order.cancelled cùng transaction. Log để lần ra ai huỷ (chỉ id đơn và vai, không dữ liệu cá
+    // nhân — security-policy §5)
+    await orderEvents.cancelled(m, order, by);
     this.logger.log(
       `Đơn ${order.id} huỷ bởi ${by}${reason ? ` (${reason})` : ''}`,
     );

@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import { OutboxEvent } from '@nextech/service-kit';
 import type { DataSource, EntityManager } from 'typeorm';
 import { Order } from '../../database/entities/order.entity';
 import { SagaTask } from '../../database/entities/saga-task.entity';
@@ -63,9 +64,12 @@ describe('OrderCancelService', () => {
       fn.mockReturnValue(qb);
     }
     qb.execute.mockResolvedValue({ raw: [{ updated_at: UPDATED_AT }] });
-    m.insert.mockImplementation((_e: unknown, rows: unknown[]) =>
+    // saga_tasks: mảng dòng; outbox order.cancelled (T4.1): một dòng
+    m.insert.mockImplementation((_e: unknown, rows: unknown) =>
       Promise.resolve({
-        identifiers: rows.map((_, i) => ({ id: `t${i + 1}` })),
+        identifiers: Array.isArray(rows)
+          ? rows.map((_, i) => ({ id: `t${i + 1}` }))
+          : [],
       }),
     );
     compensation.run.mockResolvedValue(undefined);
@@ -147,6 +151,16 @@ describe('OrderCancelService', () => {
         status: 'cancelled',
         updated_at: UPDATED_AT,
       });
+      // T4.1: order.cancelled cùng transaction, cancelled_by = user
+      expect(m.insert).toHaveBeenCalledWith(
+        OutboxEvent,
+        expect.objectContaining({
+          routing_key: 'order.cancelled',
+          payload: expect.objectContaining({
+            data: { order_id: 'o1', user_id: 'u1', cancelled_by: 'user' },
+          }) as unknown,
+        }),
+      );
     });
 
     it('sau commit nhả ngay bằng task vừa tạo, không finish, trong ngân sách SAGA_BUDGET_MS', async () => {

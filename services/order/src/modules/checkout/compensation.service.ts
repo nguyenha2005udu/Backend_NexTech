@@ -10,6 +10,7 @@ import { DataSource, In, Not, Repository } from 'typeorm';
 import { CatalogClient } from '../../clients/catalog.client';
 import { PromotionClient } from '../../clients/promotion.client';
 import { Order } from '../../database/entities/order.entity';
+import { orderEvents } from '../../outbox/order-events';
 import {
   SagaTask,
   type SagaTaskType,
@@ -146,10 +147,21 @@ export class CompensationService {
   }
 
   // Chỉ saga thất bại: đơn đã pending (thắng confirm) hay cancelled (huỷ đơn) không khớp, không đổi (test 20)
+  // T4.1: đơn vừa chuyển failed thì phát order.failed cùng transaction (NT.MESSAGING API_Spec §3)
   private async finish(orderId: string): Promise<void> {
-    await this.orders.update(
-      { id: orderId, status: 'processing', saga_step: 'compensating' },
-      { status: 'failed', saga_step: 'compensated' },
-    );
+    await this.dataSource.transaction(async (m) => {
+      const r = await m
+        .withRepository(this.orders)
+        .update(
+          { id: orderId, status: 'processing', saga_step: 'compensating' },
+          { status: 'failed', saga_step: 'compensated' },
+        );
+      if (!r.affected) return;
+      const o = await m.findOne(Order, {
+        where: { id: orderId },
+        select: { id: true, user_id: true, failure_message: true },
+      });
+      if (o) await orderEvents.failed(m, o, o.failure_message);
+    });
   }
 }
