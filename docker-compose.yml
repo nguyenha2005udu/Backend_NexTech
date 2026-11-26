@@ -354,6 +354,19 @@ services:
       DB_PASS: ${ASSISTANT_DB_PASS:-assistant_pass}
       DB_NAME: ${ASSISTANT_DB_NAME:-assistant_db}
       DB_LOGGING: ${DB_LOGGING:-false}
+      # Tìm sản phẩm, tên người dùng ở màn quản trị (design/ASSISTANT/README.md §4)
+      CATALOG_SERVICE_URL: http://catalog-service:3002
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      # Mặc định ai-mock (ADR-0013). FPT thật: đặt FPT_BASE_URL=https://mkp-api.fptcloud.com và FPT_KEY trong .env.
+      # Không depends_on ai-mock: AI chết thì gửi tin trả 503 NT-AST-1004, lịch sử và quản trị vẫn chạy.
+      FPT_BASE_URL: ${FPT_BASE_URL:-http://ai-mock:4020}
+      FPT_KEY: ${FPT_KEY:-dev}
+      FPT_MODEL: ${FPT_MODEL:-DeepSeek-V4-Flash}
+      # AI_BUDGET_MS phải nhỏ hơn PROXY_TIMEOUT_AI_MS của gateway
+      AI_CALL_TIMEOUT_MS: ${AI_CALL_TIMEOUT_MS:-30000}
+      AI_BUDGET_MS: ${AI_BUDGET_MS:-75000}
+      AI_CONTEXT_TTL_MS: ${AI_CONTEXT_TTL_MS:-300000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     healthcheck: *node-health
 
 networks:
