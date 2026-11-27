@@ -357,7 +357,7 @@ services:
       # Tìm sản phẩm, tên người dùng ở màn quản trị (design/ASSISTANT/README.md §4)
       CATALOG_SERVICE_URL: http://catalog-service:3002
       IDENTITY_SERVICE_URL: http://identity-service:3001
-      # Mặc định ai-mock (ADR-0013). FPT thật: đặt FPT_BASE_URL=https://mkp-api.fptcloud.com và FPT_KEY trong .env.
+      # Mặc định ai-mock (ADR-0013). FPT thật: đặt FPT_BASE_URL=https://token-api.fpt.ai/v1 và FPT_KEY trong .env.
       # Không depends_on ai-mock: AI chết thì gửi tin trả 503 NT-AST-1004, lịch sử và quản trị vẫn chạy.
       FPT_BASE_URL: ${FPT_BASE_URL:-http://ai-mock:4020}
       FPT_KEY: ${FPT_KEY:-dev}
