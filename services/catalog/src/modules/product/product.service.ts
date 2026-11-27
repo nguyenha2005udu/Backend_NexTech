@@ -89,7 +89,7 @@ export class ProductService {
         qb.orderBy('product.price', 'DESC');
         break;
       case 'rating_desc':
-        qb.orderBy('product.rating', 'DESC');
+        qb.orderBy('product.rating', 'DESC', 'NULLS LAST').addOrderBy('product.id', 'DESC');
         break;
       case 'newest':
       default:
